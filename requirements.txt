@@ -1,0 +1,6 @@
+pytdx>=1.72
+pandas>=2.2.3
+sqlalchemy>=2.0.40
+tqdm>=4.67.1
+python-dotenv>=1.1.0
+psycopg2-binary>=2.9.10
