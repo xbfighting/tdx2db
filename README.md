@@ -13,16 +13,26 @@
 
 ## 安装
 
+### python版本要求
+
+python >= 3.10
+
 ### 使用pip安装
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 使用Poetry安装
+### 使用[Poetry](https://python-poetry.org/)安装
 
 ```bash
 poetry install
+```
+
+### 虚拟环境创建
+
+```bash
+poetry shell
 ```
 
 ## 配置
@@ -124,3 +134,18 @@ python main.py daily --no-tqdm
 ## 许可证
 
 MIT
+
+## TODO
+
+[ ] 数据自动增量同步功能 ：自动增加增量更新功能
+[ ] 并行处理 ：使用多线程或多进程加速数据处理，特别是在处理大量股票数据时
+[ ] 类型注解 ：添加Python类型注解，提高代码可读性和IDE支持
+[ ] 代码测试 ：添加单元测试和集成测试，提高代码质量和可靠性
+[ ] Docker支持 ：提供Docker镜像，简化部署过程
+[ ] 允许用户自定义数据处理流程，例如增加均线参数，MACD等指标计算
+[ ] API接口 ：提供REST API，便于与其他系统集成
+[ ] 事件系统 ：实现事件驱动架构，支持自定义事件处理器
+
+### 更新原则
+
+优先考虑那些对用户最有价值的功能，逐步提升项目的实用性和易用性。
