@@ -48,6 +48,20 @@ class DataProcessor:
 
         # 计算一些基本的技术指标
         if all(col in processed_df.columns for col in ['close', 'volume']):
+             # 计算13日均线
+            processed_df['ma13'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=13).mean())
+            # 计算21日均线
+            processed_df['ma21'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=21).mean())
+            # 计算34日均线
+            processed_df['ma34'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=34).mean())
+            # 计算55日均线
+            processed_df['ma55'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=55).mean())
+            # 计算89日均线
+            processed_df['ma89'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=89).mean())
+            # 计算144日均线
+            processed_df['ma144'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=144).mean())
+            # 计算233日均线
+            processed_df['ma233'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=233).mean())
             # 计算5日均线
             processed_df['ma5'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=5).mean())
             # 计算10日均线
@@ -111,6 +125,20 @@ class DataProcessor:
 
          # 计算一些基本的技术指标
         if all(col in processed_df.columns for col in ['close', 'volume']):
+             # 计算13日均线
+            processed_df['ma13'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=13).mean())
+            # 计算21日均线
+            processed_df['ma21'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=21).mean())
+            # 计算34日均线
+            processed_df['ma34'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=34).mean())
+            # 计算55日均线
+            processed_df['ma55'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=55).mean())
+            # 计算89日均线
+            processed_df['ma89'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=89).mean())
+            # 计算144日均线
+            processed_df['ma144'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=144).mean())
+            # 计算233日均线
+            processed_df['ma233'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=233).mean())
             # 计算5日均线
             processed_df['ma5'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=5).mean())
             # 计算10日均线
