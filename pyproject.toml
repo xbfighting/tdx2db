@@ -18,7 +18,7 @@ psycopg2-binary = "^2.9.10"
 [[tool.poetry.source]]
 name = "aliyun"
 url = "https://mirrors.aliyun.com/pypi/simple/"
-priority = "default"
+priority = "primary"
 
 [build-system]
 requires = ["poetry-core"]
