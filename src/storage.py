@@ -6,11 +6,12 @@
 """
 
 import os
+from datetime import datetime as dt
 from pathlib import Path
 from typing import Optional, Tuple
 
 import pandas as pd
-from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, MetaData, Table
+from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, MetaData, Table, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from tqdm import tqdm
@@ -194,6 +195,144 @@ class DataStorage:
         df.to_csv(file_path, index=False, encoding='utf-8')
         logger.info(f"数据已保存到: {file_path}")
         return str(file_path)
+
+    def get_latest_datetime(self, table_name: str) -> Optional[dt]:
+        """获取表中最新的 datetime
+
+        Args:
+            table_name: 表名
+
+        Returns:
+            Optional[datetime]: 最新的 datetime，如果表为空则返回 None
+        """
+        try:
+            with self.engine.connect() as conn:
+                result = conn.execute(
+                    text(f"SELECT MAX(datetime) FROM {table_name}")
+                )
+                row = result.fetchone()
+                if row and row[0]:
+                    return row[0]
+                return None
+        except Exception as e:
+            logger.debug(f"获取表 {table_name} 最新日期时出错: {e}")
+            return None
+
+    def get_latest_datetime_by_code(
+        self,
+        table_name: str,
+        code: str
+    ) -> Optional[dt]:
+        """获取指定股票的最新 datetime
+
+        Args:
+            table_name: 表名
+            code: 股票代码
+
+        Returns:
+            Optional[datetime]: 最新的 datetime，如果没有数据则返回 None
+        """
+        try:
+            with self.engine.connect() as conn:
+                result = conn.execute(
+                    text(f"SELECT MAX(datetime) FROM {table_name} WHERE code = :code"),
+                    {"code": code}
+                )
+                row = result.fetchone()
+                if row and row[0]:
+                    return row[0]
+                return None
+        except Exception as e:
+            logger.debug(f"获取表 {table_name} 股票 {code} 最新日期时出错: {e}")
+            return None
+
+    def save_incremental(
+        self,
+        df: pd.DataFrame,
+        table_name: str,
+        conflict_columns: Tuple[str, ...] = ('code', 'datetime'),
+        batch_size: int = 10000
+    ) -> int:
+        """增量保存数据，跳过重复记录
+
+        使用 ON CONFLICT DO NOTHING 策略，需要先在数据库中添加唯一约束
+
+        Args:
+            df: 要保存的 DataFrame
+            table_name: 表名
+            conflict_columns: 唯一约束列，默认为 ('code', 'datetime')
+            batch_size: 批处理大小
+
+        Returns:
+            int: 实际插入的行数
+        """
+        if df.empty:
+            logger.warning(f"没有数据可保存到表 {table_name}")
+            return 0
+
+        total_rows = len(df)
+        inserted_count = 0
+
+        # 确保 datetime 不是索引而是列
+        df_to_save = df.copy()
+        if df_to_save.index.name == 'datetime' or isinstance(df_to_save.index, pd.DatetimeIndex):
+            df_to_save = df_to_save.reset_index()
+
+        # 获取列名
+        columns = list(df_to_save.columns)
+
+        # 构建 INSERT ... ON CONFLICT DO NOTHING SQL
+        db_type = config.db_type
+
+        try:
+            num_batches = (total_rows + batch_size - 1) // batch_size
+            iterator = tqdm(range(num_batches), desc="增量保存") if config.use_tqdm else range(num_batches)
+
+            with self.engine.connect() as conn:
+                for i in iterator:
+                    start_idx = i * batch_size
+                    end_idx = min((i + 1) * batch_size, total_rows)
+                    batch_df = df_to_save.iloc[start_idx:end_idx]
+
+                    for _, row in batch_df.iterrows():
+                        values = {col: row[col] for col in columns}
+                        placeholders = ', '.join([f':{col}' for col in columns])
+                        columns_str = ', '.join(columns)
+
+                        if db_type == 'postgresql':
+                            conflict_str = ', '.join(conflict_columns)
+                            sql = f"""
+                                INSERT INTO {table_name} ({columns_str})
+                                VALUES ({placeholders})
+                                ON CONFLICT ({conflict_str}) DO NOTHING
+                            """
+                        elif db_type == 'mysql':
+                            sql = f"""
+                                INSERT IGNORE INTO {table_name} ({columns_str})
+                                VALUES ({placeholders})
+                            """
+                        elif db_type == 'sqlite':
+                            sql = f"""
+                                INSERT OR IGNORE INTO {table_name} ({columns_str})
+                                VALUES ({placeholders})
+                            """
+                        else:
+                            raise ValueError(f"不支持的数据库类型: {db_type}")
+
+                        result = conn.execute(text(sql), values)
+                        inserted_count += result.rowcount
+
+                    conn.commit()
+
+                    if not config.use_tqdm:
+                        logger.info(f"已处理 {end_idx}/{total_rows} 条记录")
+
+            logger.info(f"增量保存完成: 共处理 {total_rows} 条，实际插入 {inserted_count} 条到表 {table_name}")
+            return inserted_count
+
+        except Exception as e:
+            logger.error(f"增量保存数据到表 {table_name} 时出错: {e}")
+            return 0
 
     def save_to_database(
         self,

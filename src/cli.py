@@ -7,6 +7,8 @@ import argparse
 import sys
 from argparse import Namespace
 
+from datetime import timedelta
+
 from .reader import TdxDataReader
 from .processor import DataProcessor
 from .storage import DataStorage
@@ -49,6 +51,8 @@ def parse_args() -> Namespace:
     daily_parser.add_argument('--end_date', help='结束日期，格式为YYYY-MM-DD')
     daily_parser.add_argument('--csv-only', action='store_true', help='仅保存到CSV')
     daily_parser.add_argument('--db-only', action='store_true', help='仅保存到数据库')
+    daily_parser.add_argument('--auto-start', action='store_true', help='自动检测起始日期（从数据库最新日期+1天开始）')
+    daily_parser.add_argument('--incremental', action='store_true', help='增量同步模式，跳过重复数据')
 
     # 获取并计算分钟线数据
     min_parser = subparsers.add_parser('minutes', help='获取分钟线数据')
@@ -58,6 +62,8 @@ def parse_args() -> Namespace:
     min_parser.add_argument('--end_date', help='结束日期，格式为YYYY-MM-DD')
     min_parser.add_argument('--csv-only', action='store_true', help='仅保存到CSV')
     min_parser.add_argument('--db-only', action='store_true', help='仅保存到数据库')
+    min_parser.add_argument('--auto-start', action='store_true', help='自动检测起始日期（从数据库最新日期+1天开始）')
+    min_parser.add_argument('--incremental', action='store_true', help='增量同步模式，跳过重复数据')
 
     # 获取板块与股票对应关系
     block_relation_parser = subparsers.add_parser('block-relation', help='获取板块与股票对应关系【未实现】')
@@ -139,6 +145,16 @@ def main() -> int:
 
     elif args.command == 'daily':
         try:
+            # 处理 --auto-start 参数
+            start_date = args.start_date
+            if hasattr(args, 'auto_start') and args.auto_start and not start_date:
+                latest = storage.get_latest_datetime('daily_data')
+                if latest:
+                    start_date = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
+                    logger.info(f"自动检测起始日期: {start_date}")
+                else:
+                    logger.info("数据库中没有数据，将获取所有数据")
+
             # 获取日线数据
             if args.code and args.market is not None:
                 # 获取单只股票的日线数据
@@ -160,7 +176,7 @@ def main() -> int:
             # 根据日期筛选
             filtered_data = processor.filter_data(
                 processed_data,
-                start_date=args.start_date,
+                start_date=start_date,
                 end_date=args.end_date,
                 codes=[args.code] if args.code else None
             )
@@ -174,9 +190,16 @@ def main() -> int:
             # 确定保存方式
             to_csv = not args.db_only
             to_db = not args.csv_only
+            incremental = hasattr(args, 'incremental') and args.incremental
 
             # 保存数据
-            storage.save_daily_data(filtered_data, to_csv=to_csv, to_db=to_db, batch_size=config.db_batch_size)
+            if to_csv:
+                storage.save_to_csv(filtered_data, 'daily_data')
+            if to_db:
+                if incremental:
+                    storage.save_incremental(filtered_data, 'daily_data', batch_size=config.db_batch_size)
+                else:
+                    storage.save_to_database(filtered_data, 'daily_data', batch_size=config.db_batch_size)
 
         except Exception as e:
             logger.error(f"获取日线数据时出错: {e}")
@@ -184,6 +207,18 @@ def main() -> int:
 
     elif args.command == 'minutes':
         try:
+            # 处理 --auto-start 参数（使用15分钟线表作为参考）
+            start_date = args.start_date
+            if hasattr(args, 'auto_start') and args.auto_start and not start_date:
+                latest = storage.get_latest_datetime('minute15_data')
+                if latest:
+                    start_date = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
+                    logger.info(f"自动检测起始日期: {start_date}")
+                else:
+                    logger.info("数据库中没有数据，将获取所有数据")
+
+            incremental = hasattr(args, 'incremental') and args.incremental
+
             # 获取分钟线数据
             if args.code and args.market is not None:
                 # 获取单只股票的分钟线数据
@@ -211,7 +246,7 @@ def main() -> int:
                     # 根据日期筛选
                     filtered_data = processor.filter_data(
                         processed_data,
-                        start_date=args.start_date,
+                        start_date=start_date,
                         end_date=args.end_date
                     )
 
@@ -231,12 +266,19 @@ def main() -> int:
 
                 # 保存数据
                 for filtered_data, freq in processed_data_list:
-                    storage.save_minute_data(filtered_data, freq=freq, to_csv=to_csv, to_db=to_db, batch_size=config.db_batch_size)
+                    table_name = f'minute{freq}_data'
+                    if to_csv:
+                        storage.save_to_csv(filtered_data, table_name)
+                    if to_db:
+                        if incremental:
+                            storage.save_incremental(filtered_data, table_name, batch_size=config.db_batch_size)
+                        else:
+                            storage.save_to_database(filtered_data, table_name, batch_size=config.db_batch_size)
             else:
                 # 获取所有股票的分钟线数据
                 logger.info("开始处理所有股票的分钟线数据...")
                 processor = DataProcessor()
-                success = reader.process_and_store_min_data(storage, processor, args.start_date)
+                success = reader.process_and_store_min_data(storage, processor, start_date)
                 if success:
                     logger.info("所有股票的分钟线数据处理完成")
                 else:
