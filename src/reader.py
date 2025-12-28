@@ -358,7 +358,8 @@ class TdxDataReader:
         code: str,
         storage: DataStorage,
         processor: DataProcessor,
-        start_date: Optional[str] = None
+        start_date: Optional[str] = None,
+        incremental: bool = True
     ) -> bool:
         """处理单只股票的5分钟数据，转换为不同周期，计算技术指标并存入数据库
 
@@ -368,11 +369,20 @@ class TdxDataReader:
             storage: 数据存储对象
             processor: 数据处理对象
             start_date: 开始日期，格式为'YYYY-MM-DD'
+            incremental: 是否启用精确增量（按股票查询最新日期）
 
         Returns:
             bool: 是否处理成功
         """
         try:
+            # 精确增量：查询该股票的最新日期
+            if incremental and not start_date:
+                from datetime import timedelta
+                latest = storage.get_latest_datetime_by_code('minute5_data', code)
+                if latest:
+                    start_date = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
+                    logger.debug(f"{code} 增量起始日期: {start_date}")
+
             # 读取5分钟数据
             df_5min = self.read_5min_data(market, code)
 
@@ -447,40 +457,25 @@ class TdxDataReader:
             processed_30min = processor.process_min_data(df_30min)
             processed_60min = processor.process_min_data(df_60min)
 
+            # 根据日期筛选
             if start_date:
-                # 根据日期筛选
-                filtered5min_data = processor.filter_data_min(
-                    processed_5min,
-                    start_date=start_date,
-                    end_date=None,
-                    codes=None
-                )
-                filtered15min_data = processor.filter_data_min(
-                    processed_15min,
-                    start_date=start_date,
-                    end_date=None,
-                    codes=None
-                )
-                filtered30min_data = processor.filter_data_min(
-                    processed_30min,
-                    start_date=start_date,
-                    end_date=None,
-                    codes=None
-                )
-                filtered60min_data = processor.filter_data_min(
-                    processed_60min,
-                    start_date=start_date,
-                    end_date=None,
-                    codes=None
-                )
+                processed_5min = processor.filter_data_min(processed_5min, start_date=start_date)
+                processed_15min = processor.filter_data_min(processed_15min, start_date=start_date)
+                processed_30min = processor.filter_data_min(processed_30min, start_date=start_date)
+                processed_60min = processor.filter_data_min(processed_60min, start_date=start_date)
 
-                storage.save_minute_data(filtered5min_data, freq=5, to_csv=False, to_db=True)
-                storage.save_minute_data(filtered15min_data, freq=15, to_csv=False, to_db=True)
-                storage.save_minute_data(filtered30min_data, freq=30, to_csv=False, to_db=True)
-                storage.save_minute_data(filtered60min_data, freq=60, to_csv=False, to_db=True)
+            # 检查是否有数据需要保存
+            if processed_5min.empty and processed_15min.empty:
+                logger.debug(f"{code} 无新数据需要同步")
+                return True
+
+            # 存入数据库（使用增量保存跳过重复）
+            if incremental:
+                storage.save_incremental(processed_5min, 'minute5_data')
+                storage.save_incremental(processed_15min, 'minute15_data')
+                storage.save_incremental(processed_30min, 'minute30_data')
+                storage.save_incremental(processed_60min, 'minute60_data')
             else:
-
-                # 存入数据库
                 storage.save_minute_data(processed_5min, freq=5, to_csv=False, to_db=True)
                 storage.save_minute_data(processed_15min, freq=15, to_csv=False, to_db=True)
                 storage.save_minute_data(processed_30min, freq=30, to_csv=False, to_db=True)
