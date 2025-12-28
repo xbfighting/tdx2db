@@ -6,9 +6,9 @@
 -- 第一步：清理重复数据（如有）
 -- ============================================
 
--- 清理 daily_data 重复记录，保留 id 最大的
+-- 清理 daily_data 重复记录，保留 id 最大的（日线使用 date 字段）
 DELETE FROM daily_data a USING daily_data b
-WHERE a.id < b.id AND a.code = b.code AND a.datetime = b.datetime;
+WHERE a.id < b.id AND a.code = b.code AND a.date = b.date;
 
 -- 清理 minute5_data 重复记录
 DELETE FROM minute5_data a USING minute5_data b
@@ -34,9 +34,9 @@ WHERE a.id < b.id AND a.block_code = b.block_code AND a.code = b.code;
 -- 第二步：添加唯一约束
 -- ============================================
 
--- daily_data 表：(code, datetime) 唯一
+-- daily_data 表：(code, date) 唯一（日线使用 date 字段）
 ALTER TABLE daily_data
-ADD CONSTRAINT uq_daily_code_datetime UNIQUE (code, datetime);
+ADD CONSTRAINT uq_daily_code_date UNIQUE (code, date);
 
 -- minute5_data 表
 ALTER TABLE minute5_data

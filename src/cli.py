@@ -197,7 +197,11 @@ def main() -> int:
                 storage.save_to_csv(filtered_data, 'daily_data')
             if to_db:
                 if incremental:
-                    storage.save_incremental(filtered_data, 'daily_data', batch_size=config.db_batch_size)
+                    storage.save_incremental(
+                        filtered_data, 'daily_data',
+                        conflict_columns=('code', 'date'),
+                        batch_size=config.db_batch_size
+                    )
                 else:
                     storage.save_to_database(filtered_data, 'daily_data', batch_size=config.db_batch_size)
 
