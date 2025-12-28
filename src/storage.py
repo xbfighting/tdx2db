@@ -196,19 +196,24 @@ class DataStorage:
         logger.info(f"数据已保存到: {file_path}")
         return str(file_path)
 
-    def get_latest_datetime(self, table_name: str) -> Optional[dt]:
-        """获取表中最新的 datetime
+    def get_latest_datetime(
+        self,
+        table_name: str,
+        date_column: str = 'datetime'
+    ) -> Optional[dt]:
+        """获取表中最新的日期/时间
 
         Args:
             table_name: 表名
+            date_column: 日期列名，默认为 'datetime'，日线数据应使用 'date'
 
         Returns:
-            Optional[datetime]: 最新的 datetime，如果表为空则返回 None
+            Optional[datetime]: 最新的日期/时间，如果表为空则返回 None
         """
         try:
             with self.engine.connect() as conn:
                 result = conn.execute(
-                    text(f"SELECT MAX(datetime) FROM {table_name}")
+                    text(f"SELECT MAX({date_column}) FROM {table_name}")
                 )
                 row = result.fetchone()
                 if row and row[0]:

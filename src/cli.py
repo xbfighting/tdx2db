@@ -148,7 +148,7 @@ def main() -> int:
             # 处理 --auto-start 参数
             start_date = args.start_date
             if hasattr(args, 'auto_start') and args.auto_start and not start_date:
-                latest = storage.get_latest_datetime('daily_data')
+                latest = storage.get_latest_datetime('daily_data', date_column='date')
                 if latest:
                     start_date = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
                     logger.info(f"自动检测起始日期: {start_date}")
