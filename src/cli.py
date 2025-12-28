@@ -70,6 +70,9 @@ def parse_args() -> Namespace:
     block_relation_parser.add_argument('--csv-only', action='store_true', help='仅保存到CSV')
     block_relation_parser.add_argument('--db-only', action='store_true', help='仅保存到数据库')
 
+    # 一键同步（日线 + 分钟线增量同步到数据库）
+    subparsers.add_parser('sync', help='一键增量同步所有数据到数据库（日线 + 5/15/30/60分钟线）')
+
     return parser.parse_args()
 
 def update_config(args: Namespace) -> None:
@@ -309,6 +312,62 @@ def main() -> int:
         except Exception as e:
             logger.error(f"获取板块与股票对应关系时出错: {e}")
             return 1
+
+    elif args.command == 'sync':
+        # 一键增量同步所有数据
+        logger.info("开始一键增量同步...")
+        processor = DataProcessor()
+        has_error = False
+
+        # 1. 同步日线数据
+        try:
+            logger.info("=== 同步日线数据 ===")
+            latest = storage.get_latest_datetime('daily_data', date_column='date')
+            start_date = None
+            if latest:
+                start_date = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
+                logger.info(f"日线起始日期: {start_date}")
+
+            data = reader.read_all_daily_data()
+            if not data.empty:
+                processed_data = processor.process_daily_data(data)
+                filtered_data = processor.filter_data(processed_data, start_date=start_date)
+                if not filtered_data.empty:
+                    storage.save_incremental(
+                        filtered_data, 'daily_data',
+                        conflict_columns=('code', 'date'),
+                        batch_size=config.db_batch_size
+                    )
+                else:
+                    logger.info("日线数据已是最新")
+            else:
+                logger.warning("未获取到日线数据")
+        except Exception as e:
+            logger.error(f"同步日线数据时出错: {e}")
+            has_error = True
+
+        # 2. 同步分钟线数据
+        try:
+            logger.info("=== 同步分钟线数据 ===")
+            latest = storage.get_latest_datetime('minute15_data')
+            start_date = None
+            if latest:
+                start_date = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
+                logger.info(f"分钟线起始日期: {start_date}")
+
+            success = reader.process_and_store_min_data(storage, processor, start_date)
+            if not success:
+                logger.error("同步分钟线数据时出错")
+                has_error = True
+        except Exception as e:
+            logger.error(f"同步分钟线数据时出错: {e}")
+            has_error = True
+
+        if has_error:
+            logger.warning("同步完成，但有部分错误")
+            return 1
+        else:
+            logger.info("一键增量同步完成！")
 
     else:
         logger.error("请指定子命令，使用 -h 查看帮助信息")
