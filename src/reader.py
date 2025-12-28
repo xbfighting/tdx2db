@@ -6,20 +6,29 @@
 - 股票列表
 """
 
+from __future__ import annotations
+
 import os
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING, Optional, List
+
 import pandas as pd
 from pytdx.reader import TdxDailyBarReader, TdxMinBarReader, TdxLCMinBarReader
 from pytdx.reader import BlockReader
 from tqdm import tqdm
 
 from .config import config
+from .logger import logger
+
+if TYPE_CHECKING:
+    from .storage import DataStorage
+    from .processor import DataProcessor
 
 class TdxDataReader:
     """通达信数据读取类"""
 
-    def __init__(self, tdx_path=None):
+    def __init__(self, tdx_path: Optional[str] = None) -> None:
         """初始化数据读取器
 
         Args:
@@ -39,7 +48,7 @@ class TdxDataReader:
         self.lc_min_reader = TdxLCMinBarReader()
         self.block_reader = BlockReader()
 
-    def get_stock_list(self):
+    def get_stock_list(self) -> pd.DataFrame:
         """获取股票列表
 
         Returns:
@@ -84,11 +93,11 @@ class TdxDataReader:
 
         return pd.DataFrame(stocks, columns=['code', 'name'])
 
-    def read_daily_data(self, market, code):
+    def read_daily_data(self, market: int, code: str) -> pd.DataFrame:
         """读取日线数据
 
         Args:
-            market: 市场代码，0表示深圳，1表示上海`
+            market: 市场代码，0表示深圳，1表示上海
             code: 股票代码
 
         Returns:
@@ -111,7 +120,7 @@ class TdxDataReader:
         data['market'] = market
         return data
 
-    def read_min_data(self, market, code):
+    def read_min_data(self, market: int, code: str) -> List[pd.DataFrame]:
         """读取5分钟线数据并生成15分钟、30分钟和60分数据
 
         Args:
@@ -130,8 +139,8 @@ class TdxDataReader:
         if not file_path.exists():
             raise FileNotFoundError(f"5分钟线数据文件不存在: {file_path}")
 
-        # 读取1分钟数据
-        print(f"正在读取{code}的5分钟线数据...")
+        # 读取5分钟数据
+        logger.info(f"正在读取 {code} 的5分钟线数据...")
         with tqdm(total=1, desc="读取进度") as pbar:
             data = self.lc_min_reader.get_df(str(file_path))
             data['code'] = code
@@ -152,8 +161,7 @@ class TdxDataReader:
         data.set_index('datetime', inplace=True)
 
         # 记得定期获取最新的数据，同步进TDX
-        print(f"数据最新时间:{data.index[-1]}")
-        print(f"数据最早时间:{data.index[0]}")
+        logger.debug(f"数据时间范围: {data.index[0]} ~ {data.index[-1]}")
 
         # 生成15分钟数据
         data_15min = data.resample('15min').agg({
@@ -199,15 +207,15 @@ class TdxDataReader:
 
         return [data_15min, data_30min, data_60min]
 
-    def read_5min_data(self, market, code):
-        """读取5x分钟线数据
+    def read_5min_data(self, market: int, code: str) -> pd.DataFrame:
+        """读取5分钟线数据
 
         Args:
             market: 市场代码，0表示深圳，1表示上海
             code: 股票代码
 
         Returns:
-            data: 5x分钟数据
+            DataFrame: 5分钟数据
         """
         # 构建分钟线数据文件路径
         market_folder = 'sz' if market == 0 else 'sh'
@@ -221,8 +229,8 @@ class TdxDataReader:
         if not file_path.exists():
             raise FileNotFoundError(f"5分钟线数据文件不存在: {file_path}")
 
-        # 读取1分钟数据
-        print(f"正在读取{code}的5分钟线数据...")
+        # 读取5分钟数据
+        logger.info(f"正在读取 {code} 的5分钟线数据...")
         with tqdm(total=1, desc="读取进度") as pbar:
             data = self.lc_min_reader.get_df(str(file_path))
             data['code'] = code
@@ -243,15 +251,14 @@ class TdxDataReader:
         data.set_index('datetime', inplace=True)
 
         # 记得定期获取最新的数据，同步进TDX
-        print(f"数据最新时间:{data.index[-1]}")
-        print(f"数据最早时间:{data.index[0]}")
+        logger.debug(f"数据时间范围: {data.index[0]} ~ {data.index[-1]}")
 
         # 重置索引，使datetime成为列
         data.reset_index(inplace=True)
 
         return data
 
-    def read_all_daily_data(self):
+    def read_all_daily_data(self) -> pd.DataFrame:
         """读取所有股票的日线数据
 
         Returns:
@@ -259,7 +266,7 @@ class TdxDataReader:
         """
         # 获取股票列表
         stocks = self.get_stock_list()
-        print(f"所有股票的日线数据{len(stocks)}")
+        logger.info(f"获取到 {len(stocks)} 只股票，开始读取日线数据...")
 
         all_data = []
         iterator = tqdm(stocks.iterrows(), total=len(stocks)) if config.use_tqdm else stocks.iterrows()
@@ -281,7 +288,7 @@ class TdxDataReader:
             except FileNotFoundError:
                 continue
             except Exception as e:
-                print(f"读取{code}日线数据时出错: {e}")
+                logger.error(f"读取 {code} 日线数据时出错: {e}")
                 continue
 
         if not all_data:
@@ -295,17 +302,22 @@ class TdxDataReader:
             try:
                 result_df['datetime'] = pd.to_datetime(result_df['datetime'])
             except Exception as e:
-                print(f"转换datetime列时出错: {e}")
+                logger.warning(f"转换datetime列时出错: {e}")
 
         return result_df
 
-    def process_and_store_min_data(self, storage, processor, start_date=None):
-        ""
+    def process_and_store_min_data(
+        self,
+        storage: DataStorage,
+        processor: DataProcessor,
+        start_date: Optional[str] = None
+    ) -> bool:
         """处理所有股票的5分钟数据，转换为不同周期，计算技术指标并存入数据库
 
         Args:
             storage: 数据存储对象
             processor: 数据处理对象
+            start_date: 开始日期，格式为'YYYY-MM-DD'
 
         Returns:
             bool: 是否处理成功
@@ -313,7 +325,7 @@ class TdxDataReader:
         try:
             # 获取股票列表
             stocks = self.get_stock_list()
-            print(f"处理所有股票的分钟数据，共{len(stocks)}只股票")
+            logger.info(f"处理所有股票的分钟数据，共 {len(stocks)} 只股票")
 
             # 创建进度条
             iterator = tqdm(stocks.iterrows(), total=len(stocks)) if config.use_tqdm else stocks.iterrows()
@@ -332,15 +344,22 @@ class TdxDataReader:
                 except FileNotFoundError:
                     continue
                 except Exception as e:
-                    print(f"处理{code}分钟数据时出错: {e}")
+                    logger.error(f"处理 {code} 分钟数据时出错: {e}")
                     continue
 
             return True
         except Exception as e:
-            print(f"处理分钟数据时出错: {e}")
+            logger.error(f"处理分钟数据时出错: {e}")
             return False
 
-    def process_single_stock_min_data(self, market, code, storage, processor, start_date=None):
+    def process_single_stock_min_data(
+        self,
+        market: int,
+        code: str,
+        storage: DataStorage,
+        processor: DataProcessor,
+        start_date: Optional[str] = None
+    ) -> bool:
         """处理单只股票的5分钟数据，转换为不同周期，计算技术指标并存入数据库
 
         Args:
@@ -348,6 +367,7 @@ class TdxDataReader:
             code: 股票代码
             storage: 数据存储对象
             processor: 数据处理对象
+            start_date: 开始日期，格式为'YYYY-MM-DD'
 
         Returns:
             bool: 是否处理成功
@@ -357,7 +377,7 @@ class TdxDataReader:
             df_5min = self.read_5min_data(market, code)
 
             if df_5min.empty:
-                print(f"{code}无5分钟数据")
+                logger.warning(f"{code} 无5分钟数据")
                 return False
 
             # 确保datetime列存在且为datetime类型
@@ -466,16 +486,16 @@ class TdxDataReader:
                 storage.save_minute_data(processed_30min, freq=30, to_csv=False, to_db=True)
                 storage.save_minute_data(processed_60min, freq=60, to_csv=False, to_db=True)
 
-            print(f"{code}分钟数据已处理并存入数据库")
+            logger.info(f"{code} 分钟数据已处理并存入数据库")
             return True
 
         except Exception as e:
-            print(f"处理{code}分钟数据时出错: {e}")
+            logger.error(f"处理 {code} 分钟数据时出错: {e}")
             return False
 
 
     # 板块关系暂时未实现，由于板块文件未找到
-    def get_block_stock_relation(self):
+    def get_block_stock_relation(self) -> pd.DataFrame:
         """获取通达信板块与股票的对应关系
 
         Returns:
@@ -488,7 +508,7 @@ class TdxDataReader:
             raise FileNotFoundError(f"板块文件目录不存在: {block_path}")
 
         blocks = self.block_reader.get_df(self.tdx_path / 'BlockMap' / 'TdxZLSelStock.dat')
-        print(blocks)  # 输出板块包含的个股代码
+        logger.debug(f"读取到板块数据: {len(blocks)} 条记录")
 
         # # 板块文件列表
         # block_files = list(block_path.glob('block*.dat'))

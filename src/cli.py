@@ -5,14 +5,20 @@
 
 import argparse
 import sys
+from argparse import Namespace
 
 from .reader import TdxDataReader
 from .processor import DataProcessor
 from .storage import DataStorage
 from .config import config
+from .logger import logger
 
-def parse_args():
-    """解析命令行参数"""
+def parse_args() -> Namespace:
+    """解析命令行参数
+
+    Returns:
+        Namespace: 解析后的命令行参数
+    """
     parser = argparse.ArgumentParser(description='通达信数据处理工具')
 
     # 通用参数
@@ -60,8 +66,12 @@ def parse_args():
 
     return parser.parse_args()
 
-def update_config(args):
-    """根据命令行参数更新配置"""
+def update_config(args: Namespace) -> None:
+    """根据命令行参数更新配置
+
+    Args:
+        args: 解析后的命令行参数
+    """
     # 更新通达信路径
     if args.tdx_path:
         config.tdx_path = args.tdx_path
@@ -90,8 +100,12 @@ def update_config(args):
     if args.no_tqdm:
         config.use_tqdm = False
 
-def main():
-    """主函数"""
+def main() -> int:
+    """主函数
+
+    Returns:
+        int: 程序退出码，0表示成功，非0表示失败
+    """
     args = parse_args()
     update_config(args)
 
@@ -99,7 +113,7 @@ def main():
     try:
         reader = TdxDataReader()
     except (ValueError, FileNotFoundError) as e:
-        print(f"错误: {e}")
+        logger.error(f"初始化失败: {e}")
         return 1
 
     # 初始化数据存储器
@@ -110,7 +124,7 @@ def main():
         # 获取股票列表
         try:
             stocks = reader.get_stock_list()
-            print(f"获取到{len(stocks)}只股票信息")
+            logger.info(f"获取到 {len(stocks)} 只股票信息")
 
             # 确定保存方式
             to_csv = not args.db_only
@@ -120,7 +134,7 @@ def main():
             storage.save_stock_info(stocks, to_csv=to_csv, to_db=to_db, batch_size=config.db_batch_size)
 
         except Exception as e:
-            print(f"获取股票列表时出错: {e}")
+            logger.error(f"获取股票列表时出错: {e}")
             return 1
 
     elif args.command == 'daily':
@@ -134,10 +148,10 @@ def main():
                 data = reader.read_all_daily_data()
 
             if data.empty:
-                print("未获取到任何数据")
+                logger.warning("未获取到任何数据")
                 return 0
 
-            print(f"获取到{len(data)}条日线数据记录")
+            logger.info(f"获取到 {len(data)} 条日线数据记录")
 
             # 处理数据
             processor = DataProcessor()
@@ -152,10 +166,10 @@ def main():
             )
 
             if filtered_data.empty:
-                print("筛选后没有数据")
+                logger.warning("筛选后没有数据")
                 return 0
 
-            print(f"筛选后有{len(filtered_data)}条日线数据记录")
+            logger.info(f"筛选后有 {len(filtered_data)} 条日线数据记录")
 
             # 确定保存方式
             to_csv = not args.db_only
@@ -165,7 +179,7 @@ def main():
             storage.save_daily_data(filtered_data, to_csv=to_csv, to_db=to_db, batch_size=config.db_batch_size)
 
         except Exception as e:
-            print(f"获取日线数据时出错: {e}")
+            logger.error(f"获取日线数据时出错: {e}")
             return 1
 
     elif args.command == 'minutes':
@@ -175,17 +189,17 @@ def main():
                 # 获取单只股票的分钟线数据
                 data_list = reader.read_min_data(args.market, args.code)
 
-                print(f"获取到{len(data_list)}种分钟线数据记录")
-                # 检查1分钟线数据
+                logger.info(f"获取到 {len(data_list)} 种分钟线数据记录")
+                # 检查数据
 
                 if data_list[0].empty:
-                    print("未获取到任何数据")
+                    logger.warning("未获取到任何数据")
                     return 0
 
                 # [data_15min, data_30min, data_60min]
-                print(f"生成了{len(data_list[0])}条15分钟线数据记录")
-                print(f"生成了{len(data_list[1])}条30分钟线数据记录")
-                print(f"生成了{len(data_list[2])}条60分钟线数据记录")
+                logger.info(f"生成了 {len(data_list[0])} 条15分钟线数据记录")
+                logger.info(f"生成了 {len(data_list[1])} 条30分钟线数据记录")
+                logger.info(f"生成了 {len(data_list[2])} 条60分钟线数据记录")
 
                 # 处理数据
                 processor = DataProcessor()
@@ -203,12 +217,12 @@ def main():
 
                     if not filtered_data.empty:
                         processed_data_list.append((filtered_data, freq))
-                        print(f"筛选后有{len(filtered_data)}条{freq}分钟线数据记录")
+                        logger.info(f"筛选后有 {len(filtered_data)} 条 {freq} 分钟线数据记录")
                     else:
-                        print(f"筛选后{freq}分钟线没有数据")
+                        logger.warning(f"筛选后 {freq} 分钟线没有数据")
 
                 if not processed_data_list:
-                    print("筛选后所有周期都没有数据")
+                    logger.warning("筛选后所有周期都没有数据")
                     return 0
 
                 # 确定保存方式
@@ -220,24 +234,24 @@ def main():
                     storage.save_minute_data(filtered_data, freq=freq, to_csv=to_csv, to_db=to_db, batch_size=config.db_batch_size)
             else:
                 # 获取所有股票的分钟线数据
-                print("开始处理所有股票的分钟线数据...")
+                logger.info("开始处理所有股票的分钟线数据...")
                 processor = DataProcessor()
                 success = reader.process_and_store_min_data(storage, processor, args.start_date)
                 if success:
-                    print("所有股票的分钟线数据处理完成")
+                    logger.info("所有股票的分钟线数据处理完成")
                 else:
-                    print("处理分钟线数据时出错")
+                    logger.error("处理分钟线数据时出错")
                     return 1
 
         except Exception as e:
-            print(f"获取分钟线数据时出错: {e}")
+            logger.error(f"获取分钟线数据时出错: {e}")
             return 1
 
     elif args.command == 'block-relation':
         # 获取板块与股票对应关系
         try:
             block_relations = reader.get_block_stock_relation()
-            print(f"获取到{len(block_relations)}条板块与股票对应关系记录")
+            logger.info(f"获取到 {len(block_relations)} 条板块与股票对应关系记录")
 
             # 确定保存方式
             to_csv = not args.db_only
@@ -247,11 +261,11 @@ def main():
             storage.save_block_relation(block_relations, to_csv=to_csv, to_db=to_db, batch_size=config.db_batch_size)
 
         except Exception as e:
-            print(f"获取板块与股票对应关系时出错: {e}")
+            logger.error(f"获取板块与股票对应关系时出错: {e}")
             return 1
 
     else:
-        print("请指定子命令，使用 -h 查看帮助信息")
+        logger.error("请指定子命令，使用 -h 查看帮助信息")
         return 1
 
     return 0

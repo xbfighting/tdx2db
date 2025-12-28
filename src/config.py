@@ -14,9 +14,22 @@ from dotenv import load_dotenv
 # 加载.env文件中的环境变量
 load_dotenv()
 
+
 class Config:
     """配置类"""
-    def __init__(self):
+
+    tdx_path: str
+    csv_output_path: str
+    db_type: str
+    db_host: str
+    db_port: str
+    db_name: str
+    db_user: str
+    db_password: str
+    db_batch_size: int
+    use_tqdm: bool
+
+    def __init__(self) -> None:
         """初始化配置"""
         # 通达信安装路径
         self.tdx_path = os.getenv('TDX_PATH', '')

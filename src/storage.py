@@ -7,6 +7,8 @@
 
 import os
 from pathlib import Path
+from typing import Optional, Tuple
+
 import pandas as pd
 from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, MetaData, Table
 from sqlalchemy.ext.declarative import declarative_base
@@ -14,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from tqdm import tqdm
 
 from .config import config
+from .logger import logger
 
 Base = declarative_base()
 
@@ -149,7 +152,11 @@ class StockInfo(Base):
 class DataStorage:
     """数据存储类"""
 
-    def __init__(self, db_url=None, csv_path=None):
+    def __init__(
+        self,
+        db_url: Optional[str] = None,
+        csv_path: Optional[str] = None
+    ) -> None:
         """初始化数据存储
 
         Args:
@@ -169,7 +176,7 @@ class DataStorage:
             Base.metadata.create_all(self.engine)
             self.Session = sessionmaker(bind=self.engine)
 
-    def save_to_csv(self, df, filename):
+    def save_to_csv(self, df: pd.DataFrame, filename: str) -> Optional[str]:
         """保存数据到CSV文件
 
         Args:
@@ -177,18 +184,23 @@ class DataStorage:
             filename: 文件名（不包含路径和扩展名）
 
         Returns:
-            str: 保存的文件路径
+            str: 保存的文件路径，如果没有数据则返回None
         """
         if df.empty:
-            print(f"警告: 没有数据可保存到{filename}.csv")
+            logger.warning(f"没有数据可保存到 {filename}.csv")
             return None
 
         file_path = Path(self.csv_path) / f"{filename}.csv"
         df.to_csv(file_path, index=False, encoding='utf-8')
-        print(f"数据已保存到: {file_path}")
+        logger.info(f"数据已保存到: {file_path}")
         return str(file_path)
 
-    def save_to_database(self, df, table_name, batch_size=10000):
+    def save_to_database(
+        self,
+        df: pd.DataFrame,
+        table_name: str,
+        batch_size: int = 10000
+    ) -> bool:
         """保存数据到数据库
 
         Args:
@@ -200,23 +212,23 @@ class DataStorage:
             bool: 是否保存成功
         """
         if df.empty:
-            print(f"警告: 没有数据可保存到表{table_name}")
+            logger.warning(f"没有数据可保存到表 {table_name}")
             return False
 
         try:
             # 获取数据总量
             total_rows = len(df)
 
-            print(f"开始保存数据到数据库表df: {df}")
+            logger.debug(f"开始保存数据到数据库表: {table_name}, 共 {total_rows} 条记录")
 
             # 如果数据量小于批处理大小，直接保存
             if total_rows <= batch_size:
                 df.to_sql(table_name, self.engine, if_exists='append', index=False)
-                print(f"数据已保存到数据库表: {table_name}")
+                logger.info(f"数据已保存到数据库表: {table_name}")
                 return True
 
             # 数据量大，分批处理
-            print(f"数据量较大({total_rows}条)，开始分批保存到数据库表: {table_name}")
+            logger.info(f"数据量较大({total_rows}条)，开始分批保存到数据库表: {table_name}")
 
             # 计算批次数
             num_batches = (total_rows + batch_size - 1) // batch_size
@@ -243,15 +255,21 @@ class DataStorage:
                 batch_df.to_sql(table_name, self.engine, if_exists=if_exists, index=False)
 
                 if not config.use_tqdm:
-                    print(f"已保存 {end_idx}/{total_rows} 条记录到数据库表 {table_name}")
+                    logger.info(f"已保存 {end_idx}/{total_rows} 条记录到数据库表 {table_name}")
 
-            print(f"所有数据已成功保存到数据库表: {table_name}")
+            logger.info(f"所有数据已成功保存到数据库表: {table_name}")
             return True
         except Exception as e:
-            print(f"保存数据到数据库表{table_name}时出错: {e}")
+            logger.error(f"保存数据到数据库表 {table_name} 时出错: {e}")
             return False
 
-    def save_daily_data(self, df, to_csv=True, to_db=True, batch_size=10000):
+    def save_daily_data(
+        self,
+        df: pd.DataFrame,
+        to_csv: bool = True,
+        to_db: bool = True,
+        batch_size: int = 10000
+    ) -> Tuple[Optional[str], bool]:
         """保存日线数据
 
         Args:
@@ -274,7 +292,14 @@ class DataStorage:
 
         return csv_path, db_success
 
-    def save_minute_data(self, df, freq=1, to_csv=True, to_db=True, batch_size=10000):
+    def save_minute_data(
+        self,
+        df: pd.DataFrame,
+        freq: int = 1,
+        to_csv: bool = True,
+        to_db: bool = True,
+        batch_size: int = 10000
+    ) -> Tuple[Optional[str], bool]:
         """保存分钟线数据
 
         Args:
@@ -298,7 +323,13 @@ class DataStorage:
 
         return csv_path, db_success
 
-    def save_stock_info(self, df, to_csv=True, to_db=True, batch_size=10000):
+    def save_stock_info(
+        self,
+        df: pd.DataFrame,
+        to_csv: bool = True,
+        to_db: bool = True,
+        batch_size: int = 10000
+    ) -> Tuple[Optional[str], bool]:
         """保存股票信息
 
         Args:
@@ -321,7 +352,13 @@ class DataStorage:
 
         return csv_path, db_success
 
-    def save_block_relation(self, df, to_csv=True, to_db=True, batch_size=10000):
+    def save_block_relation(
+        self,
+        df: pd.DataFrame,
+        to_csv: bool = True,
+        to_db: bool = True,
+        batch_size: int = 10000
+    ) -> Tuple[Optional[str], bool]:
         """保存板块与股票的对应关系
 
         Args:

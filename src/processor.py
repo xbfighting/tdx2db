@@ -7,13 +7,17 @@
 - 计算技术指标
 """
 
+from typing import Optional, List
 import pandas as pd
+
+from .logger import logger
+
 
 class DataProcessor:
     """数据处理类"""
 
     @staticmethod
-    def process_daily_data(df):
+    def process_daily_data(df: pd.DataFrame) -> pd.DataFrame:
         """处理日线数据
 
         Args:
@@ -74,7 +78,7 @@ class DataProcessor:
         return processed_df
 
     @staticmethod
-    def process_min_data(df):
+    def process_min_data(df: pd.DataFrame) -> pd.DataFrame:
         """处理分钟线数据
 
         Args:
@@ -151,7 +155,12 @@ class DataProcessor:
         return processed_df
 
     @staticmethod
-    def filter_data(df, start_date=None, end_date=None, codes=None):
+    def filter_data(
+        df: pd.DataFrame,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        codes: Optional[List[str]] = None
+    ) -> pd.DataFrame:
         """根据条件筛选数据
 
         Args:
@@ -169,8 +178,7 @@ class DataProcessor:
         filtered_df = df.copy()
 
 
-        print('start_date', start_date, pd.to_datetime(start_date))
-        # print('end_date', end_date, pd.to_datetime(end_date))
+        logger.debug(f"筛选日期范围: start_date={start_date}, end_date={end_date}")
         # 按日期筛选
         if 'date' in filtered_df.columns:
             if start_date:
@@ -192,8 +200,13 @@ class DataProcessor:
         return filtered_df
 
     @staticmethod
-    def filter_data_min(df, start_date=None, end_date=None, codes=None):
-        """根据条件筛选数据
+    def filter_data_min(
+        df: pd.DataFrame,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        codes: Optional[List[str]] = None
+    ) -> pd.DataFrame:
+        """根据条件筛选分钟线数据
 
         Args:
             df: 原始数据DataFrame
