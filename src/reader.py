@@ -6,12 +6,10 @@
 - 股票列表
 """
 
-from __future__ import annotations
-
 import os
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, List
+from typing import Optional, List
 
 import pandas as pd
 from pytdx.reader import TdxDailyBarReader, TdxMinBarReader, TdxLCMinBarReader
@@ -20,10 +18,7 @@ from tqdm import tqdm
 
 from .config import config
 from .logger import logger
-
-if TYPE_CHECKING:
-    from .storage import DataStorage
-    from .processor import DataProcessor
+from .processor import DataProcessor
 
 class TdxDataReader:
     """通达信数据读取类"""
@@ -163,47 +158,12 @@ class TdxDataReader:
         # 记得定期获取最新的数据，同步进TDX
         logger.debug(f"数据时间范围: {data.index[0]} ~ {data.index[-1]}")
 
-        # 生成15分钟数据
-        data_15min = data.resample('15min').agg({
-            'open': 'first',
-            'high': 'max',
-            'low': 'min',
-            'close': 'last',
-            'amount': 'sum',
-            'volume': 'sum',
-            'code': 'first',
-            'market': 'first'
-        }).dropna()
+        # 重采样生成多周期数据
+        data_15min = DataProcessor.resample_ohlcv(data, '15min')
+        data_30min = DataProcessor.resample_ohlcv(data, '30min')
+        data_60min = DataProcessor.resample_ohlcv(data, '60min')
 
-        # 生成30分钟数据
-        data_30min = data.resample('30min').agg({
-            'open': 'first',
-            'high': 'max',
-            'low': 'min',
-            'close': 'last',
-            'amount': 'sum',
-            'volume': 'sum',
-            'code': 'first',
-            'market': 'first'
-        }).dropna()
-
-        # 生成60分钟数据
-        data_60min = data.resample('60min').agg({
-            'open': 'first',
-            'high': 'max',
-            'low': 'min',
-            'close': 'last',
-            'amount': 'sum',
-            'volume': 'sum',
-            'code': 'first',
-            'market': 'first'
-        }).dropna()
-
-        # 重置索引，使datetime成为列
         data.reset_index(inplace=True)
-        data_15min.reset_index(inplace=True)
-        data_30min.reset_index(inplace=True)
-        data_60min.reset_index(inplace=True)
 
         return [data_15min, data_30min, data_60min]
 
@@ -305,189 +265,6 @@ class TdxDataReader:
                 logger.warning(f"转换datetime列时出错: {e}")
 
         return result_df
-
-    def process_and_store_min_data(
-        self,
-        storage: DataStorage,
-        processor: DataProcessor,
-        start_date: Optional[str] = None
-    ) -> bool:
-        """处理所有股票的5分钟数据，转换为不同周期，计算技术指标并存入数据库
-
-        Args:
-            storage: 数据存储对象
-            processor: 数据处理对象
-            start_date: 开始日期，格式为'YYYY-MM-DD'
-
-        Returns:
-            bool: 是否处理成功
-        """
-        try:
-            # 获取股票列表
-            stocks = self.get_stock_list()
-            logger.info(f"处理所有股票的分钟数据，共 {len(stocks)} 只股票")
-
-            # 创建进度条
-            iterator = tqdm(stocks.iterrows(), total=len(stocks)) if config.use_tqdm else stocks.iterrows()
-
-            for _, stock in iterator:
-                code = stock['code']
-                # 判断市场
-                if code.startswith('sh'):
-                    market = 1  # 上海
-                else:
-                    market = 0  # 深圳
-
-                try:
-                    # 处理单只股票的分钟数据
-                    self.process_single_stock_min_data(market, code, storage, processor, start_date)
-                except FileNotFoundError:
-                    continue
-                except Exception as e:
-                    logger.error(f"处理 {code} 分钟数据时出错: {e}")
-                    continue
-
-            return True
-        except Exception as e:
-            logger.error(f"处理分钟数据时出错: {e}")
-            return False
-
-    def process_single_stock_min_data(
-        self,
-        market: int,
-        code: str,
-        storage: DataStorage,
-        processor: DataProcessor,
-        start_date: Optional[str] = None,
-        incremental: bool = True
-    ) -> bool:
-        """处理单只股票的5分钟数据，转换为不同周期，计算技术指标并存入数据库
-
-        Args:
-            market: 市场代码
-            code: 股票代码
-            storage: 数据存储对象
-            processor: 数据处理对象
-            start_date: 开始日期，格式为'YYYY-MM-DD'
-            incremental: 是否启用精确增量（按股票查询最新日期）
-
-        Returns:
-            bool: 是否处理成功
-        """
-        try:
-            # 精确增量：查询该股票的最新日期
-            if incremental and not start_date:
-                from datetime import timedelta
-                latest = storage.get_latest_datetime_by_code('minute5_data', code)
-                if latest:
-                    start_date = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
-                    logger.debug(f"{code} 增量起始日期: {start_date}")
-
-            # 读取5分钟数据
-            df_5min = self.read_5min_data(market, code)
-
-            if df_5min.empty:
-                logger.warning(f"{code} 无5分钟数据")
-                return False
-
-            # 确保datetime列存在且为datetime类型
-            if 'datetime' not in df_5min.columns:
-                if isinstance(df_5min.index, pd.DatetimeIndex):
-                    df_5min['datetime'] = df_5min.index
-                df_5min = df_5min.reset_index()
-
-            # 转换datetime列为日期时间类型
-            if not pd.api.types.is_datetime64_any_dtype(df_5min['datetime']):
-                df_5min['datetime'] = pd.to_datetime(df_5min['datetime'])
-
-            # 添加date列，用于按日期筛选
-            df_5min['date'] = df_5min['datetime'].dt.date
-
-            # 设置datetime为索引，用于后续resample操作
-            df_5min = df_5min.set_index('datetime')
-
-            # 转换为15分钟数据
-            df_15min = df_5min.resample('15min').agg({
-                'open': 'first',
-                'high': 'max',
-                'low': 'min',
-                'close': 'last',
-                'volume': 'sum',
-                'amount': 'sum',
-                'code': 'first',
-                'market': 'first',
-                'date': 'first'
-            }).dropna()
-
-            # 转换为30分钟数据
-            df_30min = df_5min.resample('30min').agg({
-                'open': 'first',
-                'high': 'max',
-                'low': 'min',
-                'close': 'last',
-                'volume': 'sum',
-                'amount': 'sum',
-                'code': 'first',
-                'market': 'first',
-                'date': 'first'
-            }).dropna()
-
-            # 转换为60分钟数据
-            df_60min = df_5min.resample('60min').agg({
-                'open': 'first',
-                'high': 'max',
-                'low': 'min',
-                'close': 'last',
-                'volume': 'sum',
-                'amount': 'sum',
-                'code': 'first',
-                'market': 'first',
-                'date': 'first'
-            }).dropna()
-
-            # 重置索引
-            df_5min = df_5min.reset_index()
-            df_15min = df_15min.reset_index()
-            df_30min = df_30min.reset_index()
-            df_60min = df_60min.reset_index()
-
-            # 使用processor处理数据，计算技术指标
-            processed_5min = processor.process_min_data(df_5min)
-            processed_15min = processor.process_min_data(df_15min)
-            processed_30min = processor.process_min_data(df_30min)
-            processed_60min = processor.process_min_data(df_60min)
-
-            # 根据日期筛选
-            if start_date:
-                processed_5min = processor.filter_data_min(processed_5min, start_date=start_date)
-                processed_15min = processor.filter_data_min(processed_15min, start_date=start_date)
-                processed_30min = processor.filter_data_min(processed_30min, start_date=start_date)
-                processed_60min = processor.filter_data_min(processed_60min, start_date=start_date)
-
-            # 检查是否有数据需要保存
-            if processed_5min.empty and processed_15min.empty:
-                logger.debug(f"{code} 无新数据需要同步")
-                return True
-
-            # 存入数据库（使用增量保存跳过重复）
-            if incremental:
-                storage.save_incremental(processed_5min, 'minute5_data')
-                storage.save_incremental(processed_15min, 'minute15_data')
-                storage.save_incremental(processed_30min, 'minute30_data')
-                storage.save_incremental(processed_60min, 'minute60_data')
-            else:
-                storage.save_minute_data(processed_5min, freq=5, to_csv=False, to_db=True)
-                storage.save_minute_data(processed_15min, freq=15, to_csv=False, to_db=True)
-                storage.save_minute_data(processed_30min, freq=30, to_csv=False, to_db=True)
-                storage.save_minute_data(processed_60min, freq=60, to_csv=False, to_db=True)
-
-            logger.info(f"{code} 分钟数据已处理并存入数据库")
-            return True
-
-        except Exception as e:
-            logger.error(f"处理 {code} 分钟数据时出错: {e}")
-            return False
-
 
     # 板块关系暂时未实现，由于板块文件未找到
     def get_block_stock_relation(self) -> pd.DataFrame:

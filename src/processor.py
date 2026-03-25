@@ -5,6 +5,7 @@
 - 缺失值处理
 - 异常值检测
 - 计算技术指标
+- OHLCV 重采样
 """
 
 from typing import Optional, List
@@ -12,9 +13,58 @@ import pandas as pd
 
 from .logger import logger
 
+# 重采样聚合规则
+RESAMPLE_AGG = {
+    'open': 'first',
+    'high': 'max',
+    'low': 'min',
+    'close': 'last',
+    'volume': 'sum',
+    'amount': 'sum',
+    'code': 'first',
+    'market': 'first',
+}
+
+# 均线周期
+MA_WINDOWS = [5, 10, 13, 21, 34, 55, 60, 89, 144, 233, 250]
+
 
 class DataProcessor:
     """数据处理类"""
+
+    @staticmethod
+    def resample_ohlcv(df: pd.DataFrame, freq: str) -> pd.DataFrame:
+        """将 OHLCV 数据重采样到目标频率
+
+        Args:
+            df: 带有 DatetimeIndex 的 DataFrame
+            freq: pandas resample 频率字符串（'15min', '30min', '60min'）
+
+        Returns:
+            重采样后的 DataFrame（已 reset_index）
+        """
+        agg = dict(RESAMPLE_AGG)
+        if 'date' in df.columns:
+            agg['date'] = 'first'
+        result = df.resample(freq).agg(agg).dropna()
+        result.reset_index(inplace=True)
+        return result
+
+    @staticmethod
+    def _calculate_ma(df: pd.DataFrame) -> pd.DataFrame:
+        """计算均线指标，按股票分组
+
+        Args:
+            df: 包含 'close' 和 'code' 列的 DataFrame
+
+        Returns:
+            添加了均线列的 DataFrame
+        """
+        for w in MA_WINDOWS:
+            df[f'ma{w}'] = df.groupby('code')['close'].transform(
+                lambda x: x.rolling(window=w).mean()
+            )
+        return df
 
     @staticmethod
     def process_daily_data(df: pd.DataFrame) -> pd.DataFrame:
@@ -50,30 +100,9 @@ class DataProcessor:
                 # 用前一个有效值填充缺失值
                 processed_df[col] = processed_df[col].ffill()
 
-        # 计算一些基本的技术指标
+        # 计算均线指标
         if all(col in processed_df.columns for col in ['close', 'volume']):
-             # 计算13日均线
-            processed_df['ma13'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=13).mean())
-            # 计算21日均线
-            processed_df['ma21'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=21).mean())
-            # 计算34日均线
-            processed_df['ma34'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=34).mean())
-            # 计算55日均线
-            processed_df['ma55'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=55).mean())
-            # 计算89日均线
-            processed_df['ma89'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=89).mean())
-            # 计算144日均线
-            processed_df['ma144'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=144).mean())
-            # 计算233日均线
-            processed_df['ma233'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=233).mean())
-            # 计算5日均线
-            processed_df['ma5'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=5).mean())
-            # 计算10日均线
-            processed_df['ma10'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=10).mean())
-            # 计算60日均线
-            processed_df['ma60'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=60).mean())
-            # 计算250日均线
-            processed_df['ma250'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=250).mean())
+            processed_df = DataProcessor._calculate_ma(processed_df)
 
         return processed_df
 
@@ -127,30 +156,9 @@ class DataProcessor:
                 # 用前一个有效值填充缺失值
                 processed_df[col] = processed_df[col].ffill()
 
-         # 计算一些基本的技术指标
+        # 计算均线指标
         if all(col in processed_df.columns for col in ['close', 'volume']):
-             # 计算13日均线
-            processed_df['ma13'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=13).mean())
-            # 计算21日均线
-            processed_df['ma21'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=21).mean())
-            # 计算34日均线
-            processed_df['ma34'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=34).mean())
-            # 计算55日均线
-            processed_df['ma55'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=55).mean())
-            # 计算89日均线
-            processed_df['ma89'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=89).mean())
-            # 计算144日均线
-            processed_df['ma144'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=144).mean())
-            # 计算233日均线
-            processed_df['ma233'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=233).mean())
-            # 计算5日均线
-            processed_df['ma5'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=5).mean())
-            # 计算10日均线
-            processed_df['ma10'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=10).mean())
-            # 计算60日均线
-            processed_df['ma60'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=60).mean())
-            # 计算250日均线
-            processed_df['ma250'] = processed_df.groupby('code')['close'].transform(lambda x: x.rolling(window=250).mean())
+            processed_df = DataProcessor._calculate_ma(processed_df)
 
         return processed_df
 

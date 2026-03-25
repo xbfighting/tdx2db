@@ -6,14 +6,122 @@
 import argparse
 import sys
 from argparse import Namespace
+from typing import Optional
 
 from datetime import timedelta
+
+import pandas as pd
+from tqdm import tqdm
 
 from .reader import TdxDataReader
 from .processor import DataProcessor
 from .storage import DataStorage
 from .config import config
 from .logger import logger
+
+
+def sync_single_stock_min_data(
+    reader: TdxDataReader,
+    processor: DataProcessor,
+    storage: DataStorage,
+    market: int,
+    code: str,
+    start_date: Optional[str] = None,
+    incremental: bool = True,
+) -> bool:
+    """处理并存储单只股票的分钟数据
+
+    Args:
+        reader: 数据读取器
+        processor: 数据处理器
+        storage: 数据存储器
+        market: 市场代码
+        code: 股票代码
+        start_date: 开始日期
+        incremental: 是否启用精确增量
+    """
+    # 精确增量：查询该股票的最新日期
+    if incremental and not start_date:
+        latest = storage.get_latest_datetime_by_code('minute5_data', code)
+        if latest:
+            start_date = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
+            logger.debug(f"{code} 增量起始日期: {start_date}")
+
+    # 读取5分钟数据
+    df_5min = reader.read_5min_data(market, code)
+    if df_5min.empty:
+        logger.warning(f"{code} 无5分钟数据")
+        return False
+
+    # 准备 datetime 索引
+    if not pd.api.types.is_datetime64_any_dtype(df_5min['datetime']):
+        df_5min['datetime'] = pd.to_datetime(df_5min['datetime'])
+    df_5min['date'] = df_5min['datetime'].dt.date
+    df_5min = df_5min.set_index('datetime')
+
+    # 重采样为多周期
+    df_15min = DataProcessor.resample_ohlcv(df_5min, '15min')
+    df_30min = DataProcessor.resample_ohlcv(df_5min, '30min')
+    df_60min = DataProcessor.resample_ohlcv(df_5min, '60min')
+    df_5min = df_5min.reset_index()
+
+    # 处理、筛选、存储各周期
+    freq_data = [
+        (df_5min, 5, 'minute5_data'),
+        (df_15min, 15, 'minute15_data'),
+        (df_30min, 30, 'minute30_data'),
+        (df_60min, 60, 'minute60_data'),
+    ]
+
+    has_data = False
+    for df, freq, table_name in freq_data:
+        processed = processor.process_min_data(df)
+        if start_date:
+            processed = processor.filter_data_min(processed, start_date=start_date)
+        if processed.empty:
+            continue
+        has_data = True
+        if incremental:
+            storage.save_incremental(processed, table_name)
+        else:
+            storage.save_minute_data(processed, freq=freq, to_csv=False, to_db=True)
+
+    if has_data:
+        logger.info(f"{code} 分钟数据已处理并存入数据库")
+    else:
+        logger.debug(f"{code} 无新数据需要同步")
+
+    return True
+
+
+def sync_all_min_data(
+    reader: TdxDataReader,
+    processor: DataProcessor,
+    storage: DataStorage,
+    start_date: Optional[str] = None,
+) -> bool:
+    """编排所有股票的分钟数据同步"""
+    try:
+        stocks = reader.get_stock_list()
+        logger.info(f"处理所有股票的分钟数据，共 {len(stocks)} 只股票")
+
+        iterator = tqdm(stocks.iterrows(), total=len(stocks)) if config.use_tqdm else stocks.iterrows()
+
+        for _, stock in iterator:
+            code = stock['code']
+            market = 1 if code.startswith('sh') else 0
+            try:
+                sync_single_stock_min_data(reader, processor, storage, market, code, start_date)
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                logger.error(f"处理 {code} 分钟数据时出错: {e}")
+                continue
+
+        return True
+    except Exception as e:
+        logger.error(f"处理分钟数据时出错: {e}")
+        return False
 
 def parse_args() -> Namespace:
     """解析命令行参数
@@ -285,7 +393,7 @@ def main() -> int:
                 # 获取所有股票的分钟线数据
                 logger.info("开始处理所有股票的分钟线数据...")
                 processor = DataProcessor()
-                success = reader.process_and_store_min_data(storage, processor, start_date)
+                success = sync_all_min_data(reader, processor, storage, start_date)
                 if success:
                     logger.info("所有股票的分钟线数据处理完成")
                 else:
@@ -355,7 +463,7 @@ def main() -> int:
                 start_date = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
                 logger.info(f"分钟线起始日期: {start_date}")
 
-            success = reader.process_and_store_min_data(storage, processor, start_date)
+            success = sync_all_min_data(reader, processor, storage, start_date)
             if not success:
                 logger.error("同步分钟线数据时出错")
                 has_error = True
