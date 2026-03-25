@@ -58,6 +58,33 @@ class DailyData(Base):
     ma60 = Column(Float)
     ma250 = Column(Float)
 
+class Minute5Data(Base):
+    """5分钟线数据表模型"""
+    __tablename__ = 'minute5_data'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), nullable=False, index=True)
+    market = Column(Integer, nullable=False)
+    datetime = Column(DateTime, nullable=False, index=True)
+    date = Column(DateTime, nullable=False, index=True)
+    open = Column(Float, nullable=False)
+    high = Column(Float, nullable=False)
+    low = Column(Float, nullable=False)
+    close = Column(Float, nullable=False)
+    volume = Column(Float, nullable=False)
+    amount = Column(Float, nullable=False)
+    ma13 = Column(Float)
+    ma21 = Column(Float)
+    ma34 = Column(Float)
+    ma55 = Column(Float)
+    ma89 = Column(Float)
+    ma144 = Column(Float)
+    ma233 = Column(Float)
+    ma5 = Column(Float)
+    ma10 = Column(Float)
+    ma60 = Column(Float)
+    ma250 = Column(Float)
+
 class Minute15Data(Base):
     """15分钟线数据表模型"""
     __tablename__ = 'minute15_data'
@@ -149,6 +176,13 @@ class StockInfo(Base):
     code = Column(String(10), unique=True, index=True)
     name = Column(String(50))
     market = Column(Integer)
+
+# 允许写入的表名白名单
+_VALID_TABLES = frozenset({
+    'daily_data', 'minute5_data', 'minute15_data', 'minute30_data', 'minute60_data',
+    'stock_info', 'block_stock_relation',
+})
+
 
 class DataStorage:
     """数据存储类"""
@@ -271,6 +305,9 @@ class DataStorage:
         Returns:
             int: 实际插入的行数
         """
+        if table_name not in _VALID_TABLES:
+            raise ValueError(f"不允许写入的表名: {table_name}")
+
         if df.empty:
             logger.warning(f"没有数据可保存到表 {table_name}")
             return 0
@@ -286,8 +323,30 @@ class DataStorage:
         # 获取列名
         columns = list(df_to_save.columns)
 
-        # 构建 INSERT ... ON CONFLICT DO NOTHING SQL
+        # 预构建 SQL（只构建一次，循环内复用）
         db_type = config.db_type
+        placeholders = ', '.join([f':{col}' for col in columns])
+        columns_str = ', '.join(columns)
+
+        if db_type == 'postgresql':
+            conflict_str = ', '.join(conflict_columns)
+            sql = text(f"""
+                INSERT INTO {table_name} ({columns_str})
+                VALUES ({placeholders})
+                ON CONFLICT ({conflict_str}) DO NOTHING
+            """)
+        elif db_type == 'mysql':
+            sql = text(f"""
+                INSERT IGNORE INTO {table_name} ({columns_str})
+                VALUES ({placeholders})
+            """)
+        elif db_type == 'sqlite':
+            sql = text(f"""
+                INSERT OR IGNORE INTO {table_name} ({columns_str})
+                VALUES ({placeholders})
+            """)
+        else:
+            raise ValueError(f"不支持的数据库类型: {db_type}")
 
         try:
             num_batches = (total_rows + batch_size - 1) // batch_size
@@ -299,41 +358,17 @@ class DataStorage:
                     end_idx = min((i + 1) * batch_size, total_rows)
                     batch_df = df_to_save.iloc[start_idx:end_idx]
 
-                    for _, row in batch_df.iterrows():
-                        values = {col: row[col] for col in columns}
-                        placeholders = ', '.join([f':{col}' for col in columns])
-                        columns_str = ', '.join(columns)
-
-                        if db_type == 'postgresql':
-                            conflict_str = ', '.join(conflict_columns)
-                            sql = f"""
-                                INSERT INTO {table_name} ({columns_str})
-                                VALUES ({placeholders})
-                                ON CONFLICT ({conflict_str}) DO NOTHING
-                            """
-                        elif db_type == 'mysql':
-                            sql = f"""
-                                INSERT IGNORE INTO {table_name} ({columns_str})
-                                VALUES ({placeholders})
-                            """
-                        elif db_type == 'sqlite':
-                            sql = f"""
-                                INSERT OR IGNORE INTO {table_name} ({columns_str})
-                                VALUES ({placeholders})
-                            """
-                        else:
-                            raise ValueError(f"不支持的数据库类型: {db_type}")
-
-                        result = conn.execute(text(sql), values)
-                        inserted_count += result.rowcount
+                    # 批量执行：传入参数列表，SQLAlchemy 自动走 executemany
+                    params = batch_df.to_dict('records')
+                    conn.execute(sql, params)
 
                     conn.commit()
 
                     if not config.use_tqdm:
                         logger.info(f"已处理 {end_idx}/{total_rows} 条记录")
 
-            logger.info(f"增量保存完成: 共处理 {total_rows} 条，实际插入 {inserted_count} 条到表 {table_name}")
-            return inserted_count
+            logger.info(f"增量保存完成: 共处理 {total_rows} 条到表 {table_name}（重复数据已跳过）")
+            return total_rows
 
         except Exception as e:
             logger.error(f"增量保存数据到表 {table_name} 时出错: {e}")
