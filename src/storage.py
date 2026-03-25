@@ -286,8 +286,30 @@ class DataStorage:
         # 获取列名
         columns = list(df_to_save.columns)
 
-        # 构建 INSERT ... ON CONFLICT DO NOTHING SQL
+        # 预构建 SQL（只构建一次，循环内复用）
         db_type = config.db_type
+        placeholders = ', '.join([f':{col}' for col in columns])
+        columns_str = ', '.join(columns)
+
+        if db_type == 'postgresql':
+            conflict_str = ', '.join(conflict_columns)
+            sql = text(f"""
+                INSERT INTO {table_name} ({columns_str})
+                VALUES ({placeholders})
+                ON CONFLICT ({conflict_str}) DO NOTHING
+            """)
+        elif db_type == 'mysql':
+            sql = text(f"""
+                INSERT IGNORE INTO {table_name} ({columns_str})
+                VALUES ({placeholders})
+            """)
+        elif db_type == 'sqlite':
+            sql = text(f"""
+                INSERT OR IGNORE INTO {table_name} ({columns_str})
+                VALUES ({placeholders})
+            """)
+        else:
+            raise ValueError(f"不支持的数据库类型: {db_type}")
 
         try:
             num_batches = (total_rows + batch_size - 1) // batch_size
@@ -299,33 +321,10 @@ class DataStorage:
                     end_idx = min((i + 1) * batch_size, total_rows)
                     batch_df = df_to_save.iloc[start_idx:end_idx]
 
-                    for _, row in batch_df.iterrows():
-                        values = {col: row[col] for col in columns}
-                        placeholders = ', '.join([f':{col}' for col in columns])
-                        columns_str = ', '.join(columns)
-
-                        if db_type == 'postgresql':
-                            conflict_str = ', '.join(conflict_columns)
-                            sql = f"""
-                                INSERT INTO {table_name} ({columns_str})
-                                VALUES ({placeholders})
-                                ON CONFLICT ({conflict_str}) DO NOTHING
-                            """
-                        elif db_type == 'mysql':
-                            sql = f"""
-                                INSERT IGNORE INTO {table_name} ({columns_str})
-                                VALUES ({placeholders})
-                            """
-                        elif db_type == 'sqlite':
-                            sql = f"""
-                                INSERT OR IGNORE INTO {table_name} ({columns_str})
-                                VALUES ({placeholders})
-                            """
-                        else:
-                            raise ValueError(f"不支持的数据库类型: {db_type}")
-
-                        result = conn.execute(text(sql), values)
-                        inserted_count += result.rowcount
+                    # 批量执行：传入参数列表，SQLAlchemy 自动走 executemany
+                    params = batch_df.to_dict('records')
+                    result = conn.execute(sql, params)
+                    inserted_count += result.rowcount
 
                     conn.commit()
 
