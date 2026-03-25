@@ -30,20 +30,24 @@ python main.py stock-list --db-only
 四层管道，单向数据流：
 
 ```
-CLI (cli.py) → Reader (reader.py) → Processor (processor.py) → Storage (storage.py)
-    ↓               ↓                      ↓                        ↓
- argparse      pytdx 读取本地        清洗 + 计算均线           SQLAlchemy 写库
- 命令分发      .day/.lc5 文件        (MA5~MA250)              支持增量 ON CONFLICT
+CLI (cli.py)  → Reader (reader.py) → Processor (processor.py) → Storage (storage.py)
+    ↓                ↓                      ↓                        ↓
+ argparse        pytdx 读取本地       校验 + 重采样 + 均线      SQLAlchemy 批量写库
+ 命令分发 +      .day/.lc5 文件       (OHLCV 校验, resample,   支持增量 ON CONFLICT
+ 同步编排                              MA5~MA250)               表名白名单保护
 ```
 
+- **cli.py**: 除命令分发外，`sync_all_daily_data` / `sync_all_min_data` / `sync_single_stock_min_data` 编排逐股票流式同步
 - **config.py**: 全局单例 `config`，从 `.env` 加载配置（TDX_PATH、DB_*）
 - **logger.py**: 全局单例 `logger`
 
 ### 关键数据流
 
-1. **日线**: 读取 `vipdoc/{sz,sh}/lday/*.day` → `process_daily_data()` 添加 date 列和均线 → 写入 `daily_data` 表
-2. **分钟线**: 读取 `vipdoc/{sz,sh}/fzline/*.lc5`（5 分钟原始数据）→ resample 为 15/30/60 分钟 → `process_min_data()` 计算均线 → 分别写入 `minute{5,15,30,60}_data` 表
-3. **增量同步**: `save_incremental()` 使用 `ON CONFLICT DO NOTHING`（PostgreSQL）/ `INSERT IGNORE`（MySQL）跳过重复。分钟线按股票精确查询最新日期（`get_latest_datetime_by_code`），日线按全局最新日期。
+日线和分钟线均为**逐股票流式处理**，不全量加载到内存：
+
+1. **日线**: 逐股票读取 `vipdoc/{sz,sh}/lday/*.day` → `process_daily_data()` 校验 OHLCV + 计算均线 → 增量写入 `daily_data` 表
+2. **分钟线**: 逐股票读取 `.lc5`（5 分钟）→ `resample_ohlcv()` 重采样为 15/30/60 分钟 → `process_min_data()` 校验 + 均线 → 分别写入 `minute{5,15,30,60}_data` 表
+3. **增量同步**: `save_incremental()` 使用批量 executemany + `ON CONFLICT DO NOTHING`（PostgreSQL）/ `INSERT IGNORE`（MySQL）跳过重复。分钟线按股票精确查询最新日期（`get_latest_datetime_by_code`），日线逐股票增量。
 
 ### 数据库表
 
