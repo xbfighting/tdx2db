@@ -51,6 +51,44 @@ class DataProcessor:
         return result
 
     @staticmethod
+    def _validate_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
+        """校验 OHLCV 数据质量，丢弃不合格行
+
+        校验规则：
+        1. 价格列（open/high/low/close）必须 > 0
+        2. OHLC 关系：high >= max(open, close), low <= min(open, close)
+
+        Args:
+            df: 包含 OHLCV 列的 DataFrame
+
+        Returns:
+            校验通过的 DataFrame
+        """
+        required = ['open', 'high', 'low', 'close']
+        if not all(col in df.columns for col in required):
+            return df
+
+        before = len(df)
+
+        # 价格必须为正
+        positive_mask = (df[required] > 0).all(axis=1)
+
+        # OHLC 关系校验
+        ohlc_mask = (
+            (df['high'] >= df[['open', 'close']].max(axis=1)) &
+            (df['low'] <= df[['open', 'close']].min(axis=1))
+        )
+
+        valid_mask = positive_mask & ohlc_mask
+        df = df[valid_mask]
+
+        dropped = before - len(df)
+        if dropped > 0:
+            logger.warning(f"数据校验丢弃 {dropped} 条不合格记录（价格非正或 OHLC 关系异常）")
+
+        return df
+
+    @staticmethod
     def _calculate_ma(df: pd.DataFrame) -> pd.DataFrame:
         """计算均线指标，按股票分组
 
@@ -99,6 +137,9 @@ class DataProcessor:
             if col in processed_df.columns:
                 # 用前一个有效值填充缺失值
                 processed_df[col] = processed_df[col].ffill()
+
+        # 数据质量校验
+        processed_df = DataProcessor._validate_ohlcv(processed_df)
 
         # 计算均线指标
         if all(col in processed_df.columns for col in ['close', 'volume']):
@@ -155,6 +196,9 @@ class DataProcessor:
             if col in processed_df.columns:
                 # 用前一个有效值填充缺失值
                 processed_df[col] = processed_df[col].ffill()
+
+        # 数据质量校验
+        processed_df = DataProcessor._validate_ohlcv(processed_df)
 
         # 计算均线指标
         if all(col in processed_df.columns for col in ['close', 'volume']):
