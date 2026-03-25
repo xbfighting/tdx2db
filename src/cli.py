@@ -387,59 +387,17 @@ def main() -> int:
 
             # 获取分钟线数据
             if args.code and args.market is not None:
-                # 获取单只股票的分钟线数据
-                data_list = reader.read_min_data(args.market, args.code)
-
-                logger.info(f"获取到 {len(data_list)} 种分钟线数据记录")
-                # 检查数据
-
-                if data_list[0].empty:
-                    logger.warning("未获取到任何数据")
-                    return 0
-
-                # [data_15min, data_30min, data_60min]
-                logger.info(f"生成了 {len(data_list[0])} 条15分钟线数据记录")
-                logger.info(f"生成了 {len(data_list[1])} 条30分钟线数据记录")
-                logger.info(f"生成了 {len(data_list[2])} 条60分钟线数据记录")
-
-                # 处理数据
+                # 单只股票：统一走 sync_single_stock_min_data，覆盖 5/15/30/60 全部周期
                 processor = DataProcessor()
-                processed_data_list = []
-                for i, data in enumerate(data_list):
-                    freq = [15, 30, 60][i]  # 对应的分钟频率
-                    processed_data = processor.process_min_data(data)
-
-                    # 根据日期筛选
-                    filtered_data = processor.filter_data(
-                        processed_data,
-                        start_date=start_date,
-                        end_date=args.end_date
-                    )
-
-                    if not filtered_data.empty:
-                        processed_data_list.append((filtered_data, freq))
-                        logger.info(f"筛选后有 {len(filtered_data)} 条 {freq} 分钟线数据记录")
-                    else:
-                        logger.warning(f"筛选后 {freq} 分钟线没有数据")
-
-                if not processed_data_list:
-                    logger.warning("筛选后所有周期都没有数据")
+                success = sync_single_stock_min_data(
+                    reader, processor, storage,
+                    args.market, args.code,
+                    start_date=start_date,
+                    incremental=incremental,
+                )
+                if not success:
+                    logger.warning(f"股票 {args.code} 无数据可同步")
                     return 0
-
-                # 确定保存方式
-                to_csv = not args.db_only
-                to_db = not args.csv_only
-
-                # 保存数据
-                for filtered_data, freq in processed_data_list:
-                    table_name = f'minute{freq}_data'
-                    if to_csv:
-                        storage.save_to_csv(filtered_data, table_name)
-                    if to_db:
-                        if incremental:
-                            storage.save_incremental(filtered_data, table_name, batch_size=config.db_batch_size)
-                        else:
-                            storage.save_to_database(filtered_data, table_name, batch_size=config.db_batch_size)
             else:
                 # 获取所有股票的分钟线数据
                 logger.info("开始处理所有股票的分钟线数据...")
@@ -495,16 +453,10 @@ def main() -> int:
             logger.error(f"同步日线数据时出错: {e}")
             has_error = True
 
-        # 2. 同步分钟线数据
+        # 2. 同步分钟线数据（逐股票精确增量，不传全局 start_date）
         try:
             logger.info("=== 同步分钟线数据 ===")
-            latest = storage.get_latest_datetime('minute15_data')
-            start_date = None
-            if latest:
-                start_date = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
-                logger.info(f"分钟线起始日期: {start_date}")
-
-            success = sync_all_min_data(reader, processor, storage, start_date)
+            success = sync_all_min_data(reader, processor, storage)
             if not success:
                 logger.error("同步分钟线数据时出错")
                 has_error = True

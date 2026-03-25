@@ -360,16 +360,15 @@ class DataStorage:
 
                     # 批量执行：传入参数列表，SQLAlchemy 自动走 executemany
                     params = batch_df.to_dict('records')
-                    result = conn.execute(sql, params)
-                    inserted_count += result.rowcount
+                    conn.execute(sql, params)
 
                     conn.commit()
 
                     if not config.use_tqdm:
                         logger.info(f"已处理 {end_idx}/{total_rows} 条记录")
 
-            logger.info(f"增量保存完成: 共处理 {total_rows} 条，实际插入 {inserted_count} 条到表 {table_name}")
-            return inserted_count
+            logger.info(f"增量保存完成: 共处理 {total_rows} 条到表 {table_name}（重复数据已跳过）")
+            return total_rows
 
         except Exception as e:
             logger.error(f"增量保存数据到表 {table_name} 时出错: {e}")
