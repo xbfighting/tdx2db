@@ -94,6 +94,57 @@ def sync_single_stock_min_data(
     return True
 
 
+def sync_all_daily_data(
+    reader: TdxDataReader,
+    processor: DataProcessor,
+    storage: DataStorage,
+    start_date: Optional[str] = None,
+) -> bool:
+    """逐股票流式同步日线数据，避免全量加载到内存"""
+    try:
+        stocks = reader.get_stock_list()
+        logger.info(f"同步日线数据，共 {len(stocks)} 只股票")
+
+        iterator = tqdm(stocks.iterrows(), total=len(stocks)) if config.use_tqdm else stocks.iterrows()
+        total_inserted = 0
+
+        for _, stock in iterator:
+            code = stock['code']
+            market = 1 if code.startswith('sh') else 0
+            try:
+                data = reader.read_daily_data(market, code)
+                if isinstance(data.index, pd.DatetimeIndex) or data.index.name == 'datetime':
+                    data = data.reset_index()
+                if data.empty:
+                    continue
+
+                processed = processor.process_daily_data(data)
+                filtered = processor.filter_data(processed, start_date=start_date)
+                if filtered.empty:
+                    continue
+
+                inserted = storage.save_incremental(
+                    filtered, 'daily_data',
+                    conflict_columns=('code', 'date'),
+                    batch_size=config.db_batch_size
+                )
+                total_inserted += inserted
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                logger.error(f"同步 {code} 日线数据时出错: {e}")
+                continue
+
+        if total_inserted > 0:
+            logger.info(f"日线数据同步完成，共插入 {total_inserted} 条")
+        else:
+            logger.info("日线数据已是最新")
+        return True
+    except Exception as e:
+        logger.error(f"同步日线数据时出错: {e}")
+        return False
+
+
 def sync_all_min_data(
     reader: TdxDataReader,
     processor: DataProcessor,
@@ -436,20 +487,10 @@ def main() -> int:
                 start_date = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
                 logger.info(f"日线起始日期: {start_date}")
 
-            data = reader.read_all_daily_data()
-            if not data.empty:
-                processed_data = processor.process_daily_data(data)
-                filtered_data = processor.filter_data(processed_data, start_date=start_date)
-                if not filtered_data.empty:
-                    storage.save_incremental(
-                        filtered_data, 'daily_data',
-                        conflict_columns=('code', 'date'),
-                        batch_size=config.db_batch_size
-                    )
-                else:
-                    logger.info("日线数据已是最新")
-            else:
-                logger.warning("未获取到日线数据")
+            success = sync_all_daily_data(reader, processor, storage, start_date)
+            if not success:
+                logger.error("同步日线数据时出错")
+                has_error = True
         except Exception as e:
             logger.error(f"同步日线数据时出错: {e}")
             has_error = True

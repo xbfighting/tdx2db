@@ -58,6 +58,33 @@ class DailyData(Base):
     ma60 = Column(Float)
     ma250 = Column(Float)
 
+class Minute5Data(Base):
+    """5分钟线数据表模型"""
+    __tablename__ = 'minute5_data'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(10), nullable=False, index=True)
+    market = Column(Integer, nullable=False)
+    datetime = Column(DateTime, nullable=False, index=True)
+    date = Column(DateTime, nullable=False, index=True)
+    open = Column(Float, nullable=False)
+    high = Column(Float, nullable=False)
+    low = Column(Float, nullable=False)
+    close = Column(Float, nullable=False)
+    volume = Column(Float, nullable=False)
+    amount = Column(Float, nullable=False)
+    ma13 = Column(Float)
+    ma21 = Column(Float)
+    ma34 = Column(Float)
+    ma55 = Column(Float)
+    ma89 = Column(Float)
+    ma144 = Column(Float)
+    ma233 = Column(Float)
+    ma5 = Column(Float)
+    ma10 = Column(Float)
+    ma60 = Column(Float)
+    ma250 = Column(Float)
+
 class Minute15Data(Base):
     """15分钟线数据表模型"""
     __tablename__ = 'minute15_data'
@@ -149,6 +176,13 @@ class StockInfo(Base):
     code = Column(String(10), unique=True, index=True)
     name = Column(String(50))
     market = Column(Integer)
+
+# 允许写入的表名白名单
+_VALID_TABLES = frozenset({
+    'daily_data', 'minute5_data', 'minute15_data', 'minute30_data', 'minute60_data',
+    'stock_info', 'block_stock_relation',
+})
+
 
 class DataStorage:
     """数据存储类"""
@@ -271,6 +305,9 @@ class DataStorage:
         Returns:
             int: 实际插入的行数
         """
+        if table_name not in _VALID_TABLES:
+            raise ValueError(f"不允许写入的表名: {table_name}")
+
         if df.empty:
             logger.warning(f"没有数据可保存到表 {table_name}")
             return 0
