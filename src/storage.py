@@ -313,7 +313,6 @@ class DataStorage:
             return 0
 
         total_rows = len(df)
-        inserted_count = 0
 
         # 确保 datetime 不是索引而是列
         df_to_save = df.copy()
@@ -322,50 +321,30 @@ class DataStorage:
 
         # 获取列名
         columns = list(df_to_save.columns)
-
-        # 预构建 SQL（只构建一次，循环内复用）
-        db_type = config.db_type
-        placeholders = ', '.join([f':{col}' for col in columns])
         columns_str = ', '.join(columns)
-
-        if db_type == 'postgresql':
-            conflict_str = ', '.join(conflict_columns)
-            sql = text(f"""
-                INSERT INTO {table_name} ({columns_str})
-                VALUES ({placeholders})
-                ON CONFLICT ({conflict_str}) DO NOTHING
-            """)
-        elif db_type == 'mysql':
-            sql = text(f"""
-                INSERT IGNORE INTO {table_name} ({columns_str})
-                VALUES ({placeholders})
-            """)
-        elif db_type == 'sqlite':
-            sql = text(f"""
-                INSERT OR IGNORE INTO {table_name} ({columns_str})
-                VALUES ({placeholders})
-            """)
-        else:
-            raise ValueError(f"不支持的数据库类型: {db_type}")
+        db_type = config.db_type
 
         try:
-            num_batches = (total_rows + batch_size - 1) // batch_size
-            iterator = tqdm(range(num_batches), desc="增量保存") if config.use_tqdm else range(num_batches)
+            if db_type == 'postgresql':
+                self._save_incremental_pg(
+                    df_to_save, columns, columns_str,
+                    table_name, conflict_columns, batch_size
+                )
+            else:
+                # MySQL / SQLite: 走 SQLAlchemy executemany
+                placeholders = ', '.join([f':{col}' for col in columns])
+                if db_type == 'mysql':
+                    sql = text(f"INSERT IGNORE INTO {table_name} ({columns_str}) VALUES ({placeholders})")
+                elif db_type == 'sqlite':
+                    sql = text(f"INSERT OR IGNORE INTO {table_name} ({columns_str}) VALUES ({placeholders})")
+                else:
+                    raise ValueError(f"不支持的数据库类型: {db_type}")
 
-            with self.engine.connect() as conn:
-                for i in iterator:
-                    start_idx = i * batch_size
-                    end_idx = min((i + 1) * batch_size, total_rows)
-                    batch_df = df_to_save.iloc[start_idx:end_idx]
-
-                    # 批量执行：传入参数列表，SQLAlchemy 自动走 executemany
-                    params = batch_df.to_dict('records')
-                    conn.execute(sql, params)
-
-                    conn.commit()
-
-                    if not config.use_tqdm:
-                        logger.info(f"已处理 {end_idx}/{total_rows} 条记录")
+                with self.engine.connect() as conn:
+                    for i in range(0, total_rows, batch_size):
+                        batch_df = df_to_save.iloc[i:i + batch_size]
+                        conn.execute(sql, batch_df.to_dict('records'))
+                        conn.commit()
 
             logger.info(f"增量保存完成: 共处理 {total_rows} 条到表 {table_name}（重复数据已跳过）")
             return total_rows
@@ -373,6 +352,36 @@ class DataStorage:
         except Exception as e:
             logger.error(f"增量保存数据到表 {table_name} 时出错: {e}")
             return 0
+
+    def _save_incremental_pg(
+        self,
+        df: pd.DataFrame,
+        columns: list,
+        columns_str: str,
+        table_name: str,
+        conflict_columns: Tuple[str, ...],
+        batch_size: int,
+    ) -> None:
+        """PostgreSQL 专用：使用 execute_values 真正批量插入
+
+        一次网络往返插入整批数据，比 executemany 快 10-100x。
+        """
+        from psycopg2.extras import execute_values
+
+        conflict_str = ', '.join(conflict_columns)
+        sql = f"INSERT INTO {table_name} ({columns_str}) VALUES %s ON CONFLICT ({conflict_str}) DO NOTHING"
+
+        # DataFrame → list of tuples，NaN/NaT → None（psycopg2 需要 None 表示 NULL）
+        df_clean = df.astype(object).where(df.notna(), None)
+        values = list(df_clean.itertuples(index=False, name=None))
+
+        raw_conn = self.engine.raw_connection()
+        try:
+            cursor = raw_conn.cursor()
+            execute_values(cursor, sql, values, page_size=batch_size)
+            raw_conn.commit()
+        finally:
+            raw_conn.close()
 
     def save_to_database(
         self,
