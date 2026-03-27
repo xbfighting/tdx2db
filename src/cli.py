@@ -40,9 +40,12 @@ def sync_single_stock_min_data(
         start_date: 开始日期
         incremental: 是否启用精确增量
     """
+    # DB 中 code 为纯 6 位数字（reader 写入时会截取），查询时需匹配
+    db_code = code[-6:] if len(code) > 6 else code
+
     # 精确增量：查询该股票的最新日期
     if incremental and not start_date:
-        latest = storage.get_latest_datetime_by_code('minute5_data', code)
+        latest = storage.get_latest_datetime_by_code('minute5_data', db_code)
         if latest:
             start_date = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
             logger.debug(f"{code} 增量起始日期: {start_date}")
