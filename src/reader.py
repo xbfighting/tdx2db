@@ -104,8 +104,8 @@ class TdxDataReader:
 
                 pure_code = code[-6:]
                 code_str = str(pure_code).zfill(6)  # 补齐为6位字符串
-                # 匹配上证A股+深证A股
-                if re.match(r'^(60|688)\d{4}$', code_str):
+                # 匹配上证A股（60xxxx）和科创板（688xxx）
+                if re.match(r'^(60\d{4}|688\d{3})$', code_str):
                     stocks.append({'code': code, 'name': name})
 
         if not stocks:
