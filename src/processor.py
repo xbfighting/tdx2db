@@ -185,12 +185,85 @@ class DataProcessor:
         return df
 
     @staticmethod
-    def process_daily_data(df: pd.DataFrame, gbbq: pd.DataFrame = None) -> pd.DataFrame:
+    def apply_backward_adj(df: pd.DataFrame, gbbq: pd.DataFrame) -> pd.DataFrame:
+        """计算后复权价格并原地更新 open/high/low/close，新增 adj_factor 列
+
+        后复权算法：对每个除权日，将该日及之后的全部数据乘以 1/factor，
+        使价格序列以最早历史价格为基准保持连续。
+
+        Args:
+            df: 单只股票的日线 DataFrame，含 code(6位), market, date, open/high/low/close
+            gbbq: 全量权息 DataFrame（来自 reader.read_gbbq()）
+
+        Returns:
+            含 adj_factor 列、价格已后复权的 DataFrame
+        """
+        if gbbq.empty or df.empty:
+            df = df.copy()
+            df['adj_factor'] = 1.0
+            return df
+
+        market_val = df['market'].iloc[0]
+        prefix = 'sz' if market_val == 0 else 'sh'
+        full_code = prefix + str(df['code'].iloc[0]).zfill(6)
+
+        events = gbbq[gbbq['full_code'] == full_code].copy()
+        df = df.copy()
+        if events.empty:
+            df['adj_factor'] = 1.0
+            return df
+
+        events['ex_date'] = pd.to_datetime(
+            events['datetime'].astype(str).str[:8], format='%Y%m%d'
+        )
+        data_start = df['date'].min()
+        events = events[
+            (events['category'] == 1) & (events['ex_date'] > data_start)
+        ].sort_values('ex_date')
+
+        df = df.sort_values('date').copy()
+        df['adj_factor'] = 1.0
+
+        for _, ev in events.iterrows():
+            ex_date = ev['ex_date']
+            songgu   = float(ev.get('songgu_qianzongguben', 0) or 0) / 10.0
+            hongli   = float(ev.get('hongli_panqianliutong', 0) or 0) / 10.0
+            peigujia = float(ev.get('peigujia_qianzongguben', 0) or 0)
+            peigu    = float(ev.get('peigu_houzongguben', 0) or 0) / 10.0
+
+            before = df[df['date'] < ex_date]
+            if before.empty:
+                continue
+            prev_close = float(before['close'].iloc[-1])
+            if prev_close <= 0:
+                continue
+
+            denominator = prev_close * (1 + songgu + peigu)
+            if denominator <= 0:
+                continue
+            factor = (prev_close - hongli + peigujia * peigu) / denominator
+
+            if factor <= 0 or factor > 2:
+                logger.warning(f"{full_code} 除权日 {ex_date} 复权因子异常({factor:.4f})，已跳过")
+                continue
+
+            # 后复权：除权日及之后乘以 1/factor（向上调整，历史价格不变）
+            mask = df['date'] >= ex_date
+            df.loc[mask, 'adj_factor'] *= (1.0 / factor)
+
+        for col in ['open', 'high', 'low', 'close']:
+            df[col] = (df[col] * df['adj_factor']).round(3)
+
+        return df
+
+    @staticmethod
+    def process_daily_data(df: pd.DataFrame, gbbq: pd.DataFrame = None, adj_type: str = 'forward') -> pd.DataFrame:
         """处理日线数据
 
         Args:
             df: 原始日线数据DataFrame
-            gbbq: 权息数据（来自 reader.read_gbbq()），传入时执行前复权，None 时跳过复权
+            gbbq: 权息数据（来自 reader.read_gbbq()），传入时执行复权，None 时跳过复权
+            adj_type: 复权类型，'forward'（前复权）/ 'backward'（后复权）/ 'none'（不复权），默认 'forward'
 
         Returns:
             DataFrame: 处理后的数据
@@ -222,9 +295,14 @@ class DataProcessor:
         # 数据质量校验
         processed_df = DataProcessor._validate_ohlcv(processed_df)
 
-        # 前复权处理（在均线计算之前，确保均线基于复权价格）
+        # 复权处理（在均线计算之前，确保均线基于复权价格）
         if gbbq is not None and not gbbq.empty and 'date' in processed_df.columns:
-            processed_df = DataProcessor.apply_forward_adj(processed_df, gbbq)
+            if adj_type == 'forward':
+                processed_df = DataProcessor.apply_forward_adj(processed_df, gbbq)
+            elif adj_type == 'backward':
+                processed_df = DataProcessor.apply_backward_adj(processed_df, gbbq)
+            else:  # 'none'
+                processed_df['adj_factor'] = 1.0
 
         # 计算均线指标
         if all(col in processed_df.columns for col in ['close', 'volume']):

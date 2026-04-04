@@ -103,6 +103,7 @@ def sync_all_daily_data(
     storage: DataStorage,
     start_date: Optional[str] = None,
     gbbq: Optional[pd.DataFrame] = None,
+    adj_type: str = 'forward',
 ) -> bool:
     """逐股票流式同步日线数据，避免全量加载到内存"""
     try:
@@ -122,7 +123,7 @@ def sync_all_daily_data(
                 if data.empty:
                     continue
 
-                processed = processor.process_daily_data(data, gbbq=gbbq)
+                processed = processor.process_daily_data(data, gbbq=gbbq, adj_type=adj_type)
                 filtered = processor.filter_data(processed, start_date=start_date)
                 if filtered.empty:
                     continue
@@ -216,6 +217,12 @@ def parse_args() -> Namespace:
     daily_parser.add_argument('--db-only', action='store_true', help='仅保存到数据库')
     daily_parser.add_argument('--auto-start', action='store_true', help='自动检测起始日期（从数据库最新日期+1天开始）')
     daily_parser.add_argument('--incremental', action='store_true', help='增量同步模式，跳过重复数据')
+    daily_parser.add_argument(
+        '--adj-type',
+        choices=['forward', 'backward', 'none'],
+        default='forward',
+        help='复权类型：forward（前复权，默认）/ backward（后复权）/ none（不复权）'
+    )
 
     # 获取并计算分钟线数据
     min_parser = subparsers.add_parser('minutes', help='获取分钟线数据')
@@ -234,7 +241,13 @@ def parse_args() -> Namespace:
     block_relation_parser.add_argument('--db-only', action='store_true', help='仅保存到数据库')
 
     # 一键同步（日线 + 分钟线增量同步到数据库）
-    subparsers.add_parser('sync', help='一键增量同步所有数据到数据库（日线 + 5/15/30/60分钟线）')
+    sync_parser = subparsers.add_parser('sync', help='一键增量同步所有数据到数据库（日线 + 5/15/30/60分钟线）')
+    sync_parser.add_argument(
+        '--adj-type',
+        choices=['forward', 'backward', 'none'],
+        default='forward',
+        help='复权类型：forward（前复权，默认）/ backward（后复权）/ none（不复权）'
+    )
 
     return parser.parse_args()
 
@@ -338,30 +351,65 @@ def main() -> int:
                 if isinstance(data.index, pd.DatetimeIndex) or data.index.name in ('datetime', 'date'):
                     data = data.reset_index()
             else:
-                # 获取所有股票的日线数据
-                data = reader.read_all_daily_data()
+                # 逐股票处理以确保复权正确（apply_forward/backward_adj 仅支持单只股票）
+                stocks = reader.get_stock_list()
+                processor = DataProcessor()
+                gbbq = reader.read_gbbq()
+                adj_type = getattr(args, 'adj_type', 'forward')
+                to_csv = not args.db_only
+                to_db = not args.csv_only
+                incremental = hasattr(args, 'incremental') and args.incremental
 
+                iterator = tqdm(stocks.iterrows(), total=len(stocks)) if config.use_tqdm else stocks.iterrows()
+                all_filtered = []
+                for _, stock in iterator:
+                    scode = stock['code']
+                    smarket = 1 if scode.startswith('sh') else 0
+                    try:
+                        sdata = reader.read_daily_data(smarket, scode)
+                        if isinstance(sdata.index, pd.DatetimeIndex) or sdata.index.name in ('datetime', 'date'):
+                            sdata = sdata.reset_index()
+                        if sdata.empty:
+                            continue
+                        processed = processor.process_daily_data(sdata, gbbq=gbbq, adj_type=adj_type)
+                        filtered = processor.filter_data(processed, start_date=start_date, end_date=args.end_date)
+                        if filtered.empty:
+                            continue
+                        if to_db:
+                            if incremental:
+                                storage.save_incremental(filtered, 'daily_data', conflict_columns=('code', 'date'), batch_size=config.db_batch_size)
+                            else:
+                                storage.save_to_database(filtered, 'daily_data', batch_size=config.db_batch_size)
+                        if to_csv:
+                            all_filtered.append(filtered)
+                    except FileNotFoundError:
+                        continue
+                    except Exception as e:
+                        logger.error(f"处理 {scode} 日线数据时出错: {e}")
+                        continue
+
+                if to_csv and all_filtered:
+                    storage.save_to_csv(pd.concat(all_filtered, ignore_index=True), 'daily_data')
+                return 0
+
+            # 单只股票路径
             if data.empty:
                 logger.warning("未获取到任何数据")
                 return 0
 
             logger.info(f"获取到 {len(data)} 条日线数据记录")
 
-            # 处理数据
             processor = DataProcessor()
             gbbq = reader.read_gbbq()
-            processed_data = processor.process_daily_data(data, gbbq=gbbq)
+            adj_type = getattr(args, 'adj_type', 'forward')
+            processed_data = processor.process_daily_data(data, gbbq=gbbq, adj_type=adj_type)
 
-            # 根据日期筛选（code 过滤用纯6位格式，与 DataFrame 中的 code 列一致）
-            filter_code = None
-            if args.code:
-                c = args.code
-                filter_code = [c[-6:] if len(c) > 6 else c]
+            c = args.code
             filtered_data = processor.filter_data(
                 processed_data,
                 start_date=start_date,
                 end_date=args.end_date,
-                codes=filter_code
+                codes=[c[-6:] if len(c) > 6 else c]
             )
 
             if filtered_data.empty:
@@ -370,12 +418,10 @@ def main() -> int:
 
             logger.info(f"筛选后有 {len(filtered_data)} 条日线数据记录")
 
-            # 确定保存方式
             to_csv = not args.db_only
             to_db = not args.csv_only
             incremental = hasattr(args, 'incremental') and args.incremental
 
-            # 保存数据
             if to_csv:
                 storage.save_to_csv(filtered_data, 'daily_data')
             if to_db:
@@ -467,7 +513,8 @@ def main() -> int:
                 logger.info(f"日线起始日期: {start_date}")
 
             gbbq = reader.read_gbbq()
-            success = sync_all_daily_data(reader, processor, storage, start_date, gbbq=gbbq)
+            adj_type = getattr(args, 'adj_type', 'forward')
+            success = sync_all_daily_data(reader, processor, storage, start_date, gbbq=gbbq, adj_type=adj_type)
             if not success:
                 logger.error("同步日线数据时出错")
                 has_error = True
