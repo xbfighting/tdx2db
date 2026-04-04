@@ -134,11 +134,11 @@ class TdxDataReader:
         if not file_path.exists():
             raise FileNotFoundError(f"日线数据文件不存在: {file_path}")
 
-        # 读取数据
-        try:
+        # 读取数据：先检查 pytdx 是否支持该证券类型，不支持则直接走原始解析（如科创板 688xxx）
+        sec_type = self.daily_reader.get_security_type(str(file_path))
+        if sec_type in self.daily_reader.SECURITY_TYPE:
             data = self.daily_reader.get_df(str(file_path))
-        except NotImplementedError:
-            # pytdx 不识别的证券类型（如科创板 688xxx），直接解析二进制，系数与 SH_A_STOCK 相同
+        else:
             data = self._read_day_file_raw(str(file_path))
         data['code'] = code
         data['market'] = market
