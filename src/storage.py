@@ -46,6 +46,7 @@ class DailyData(Base):
     close = Column(Float)
     volume = Column(Float)
     amount = Column(Float)
+    adj_factor = Column(Float)  # 前复权因子，1.0 表示无复权
     ma13 = Column(Float)
     ma21 = Column(Float)
     ma34 = Column(Float)

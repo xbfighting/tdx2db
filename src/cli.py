@@ -102,6 +102,7 @@ def sync_all_daily_data(
     processor: DataProcessor,
     storage: DataStorage,
     start_date: Optional[str] = None,
+    gbbq: Optional[pd.DataFrame] = None,
 ) -> bool:
     """逐股票流式同步日线数据，避免全量加载到内存"""
     try:
@@ -116,12 +117,12 @@ def sync_all_daily_data(
             market = 1 if code.startswith('sh') else 0
             try:
                 data = reader.read_daily_data(market, code)
-                if isinstance(data.index, pd.DatetimeIndex) or data.index.name == 'datetime':
+                if isinstance(data.index, pd.DatetimeIndex) or data.index.name in ('datetime', 'date'):
                     data = data.reset_index()
                 if data.empty:
                     continue
 
-                processed = processor.process_daily_data(data)
+                processed = processor.process_daily_data(data, gbbq=gbbq)
                 filtered = processor.filter_data(processed, start_date=start_date)
                 if filtered.empty:
                     continue
@@ -321,9 +322,21 @@ def main() -> int:
                     logger.info("数据库中没有数据，将获取所有数据")
 
             # 获取日线数据
-            if args.code and args.market is not None:
-                # 获取单只股票的日线数据
-                data = reader.read_daily_data(args.market, args.code)
+            if args.code:
+                # 自动推断市场：支持 sz/sh 前缀，或纯6位代码（6/688开头→sh，其余→sz）
+                code = args.code
+                if args.market is not None:
+                    market = args.market
+                elif code.startswith('sh'):
+                    market = 1
+                elif code.startswith('sz'):
+                    market = 0
+                else:
+                    pure = code[-6:]
+                    market = 1 if pure.startswith(('6', '688')) else 0
+                data = reader.read_daily_data(market, code)
+                if isinstance(data.index, pd.DatetimeIndex) or data.index.name in ('datetime', 'date'):
+                    data = data.reset_index()
             else:
                 # 获取所有股票的日线数据
                 data = reader.read_all_daily_data()
@@ -336,14 +349,19 @@ def main() -> int:
 
             # 处理数据
             processor = DataProcessor()
-            processed_data = processor.process_daily_data(data)
+            gbbq = reader.read_gbbq()
+            processed_data = processor.process_daily_data(data, gbbq=gbbq)
 
-            # 根据日期筛选
+            # 根据日期筛选（code 过滤用纯6位格式，与 DataFrame 中的 code 列一致）
+            filter_code = None
+            if args.code:
+                c = args.code
+                filter_code = [c[-6:] if len(c) > 6 else c]
             filtered_data = processor.filter_data(
                 processed_data,
                 start_date=start_date,
                 end_date=args.end_date,
-                codes=[args.code] if args.code else None
+                codes=filter_code
             )
 
             if filtered_data.empty:
@@ -448,7 +466,8 @@ def main() -> int:
                 start_date = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
                 logger.info(f"日线起始日期: {start_date}")
 
-            success = sync_all_daily_data(reader, processor, storage, start_date)
+            gbbq = reader.read_gbbq()
+            success = sync_all_daily_data(reader, processor, storage, start_date, gbbq=gbbq)
             if not success:
                 logger.error("同步日线数据时出错")
                 has_error = True

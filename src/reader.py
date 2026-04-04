@@ -13,7 +13,7 @@ from typing import Optional, List
 
 import pandas as pd
 from pytdx.reader import TdxDailyBarReader, TdxMinBarReader, TdxLCMinBarReader
-from pytdx.reader import BlockReader
+from pytdx.reader import BlockReader, GbbqReader
 from tqdm import tqdm
 
 from .config import config
@@ -42,6 +42,31 @@ class TdxDataReader:
         self.min_reader = TdxMinBarReader()
         self.lc_min_reader = TdxLCMinBarReader()
         self.block_reader = BlockReader()
+        self.gbbq_reader = GbbqReader()
+
+    def read_gbbq(self) -> pd.DataFrame:
+        """读取通达信本地权息文件（gbbq），返回全量权息 DataFrame
+
+        Returns:
+            DataFrame: 权息数据，列包括 market, code, datetime(YYYYMMDD整数), category,
+                       hongli_panqianliutong, peigujia_qianzongguben, songgu_qianzongguben,
+                       peigu_houzongguben, full_code(sz/sh+6位代码)
+            若文件不存在则返回空 DataFrame（复权逻辑会优雅降级）
+        """
+        gbbq_path = self.tdx_path / 'T0002' / 'hq_cache' / 'gbbq'
+        if not gbbq_path.exists():
+            logger.warning(f"权息文件不存在: {gbbq_path}，将跳过复权处理")
+            return pd.DataFrame()
+        try:
+            df = self.gbbq_reader.get_df(str(gbbq_path))
+            if df.empty:
+                return pd.DataFrame()
+            market_prefix = df['market'].map({0: 'sz', 1: 'sh'})
+            df['full_code'] = market_prefix + df['code'].astype(str).str.zfill(6)
+            return df
+        except Exception as e:
+            logger.warning(f"读取权息文件时出错: {e}，将跳过复权处理")
+            return pd.DataFrame()
 
     def get_stock_list(self) -> pd.DataFrame:
         """获取股票列表
@@ -110,10 +135,34 @@ class TdxDataReader:
             raise FileNotFoundError(f"日线数据文件不存在: {file_path}")
 
         # 读取数据
-        data = self.daily_reader.get_df(str(file_path))
+        try:
+            data = self.daily_reader.get_df(str(file_path))
+        except NotImplementedError:
+            # pytdx 不识别的证券类型（如科创板 688xxx），直接解析二进制，系数与 SH_A_STOCK 相同
+            data = self._read_day_file_raw(str(file_path))
         data['code'] = code
         data['market'] = market
         return data
+
+    @staticmethod
+    def _read_day_file_raw(fname: str) -> pd.DataFrame:
+        """直接解析 .day 文件，绕过 pytdx 的证券类型检查（用于科创板等）"""
+        import struct
+        rows = []
+        with open(fname, 'rb') as f:
+            content = f.read()
+        record_size = struct.calcsize('<IIIIIfII')
+        for i in range(0, len(content) - record_size + 1, record_size):
+            row = struct.unpack_from('<IIIIIfII', content, i)
+            t = str(row[0])
+            date_str = f"{t[:4]}-{t[4:6]}-{t[6:]}"
+            rows.append((date_str,
+                         row[1] * 0.01, row[2] * 0.01, row[3] * 0.01, row[4] * 0.01,
+                         row[5], row[6] * 0.01))
+        df = pd.DataFrame(rows, columns=['date', 'open', 'high', 'low', 'close', 'amount', 'volume'])
+        df.index = pd.to_datetime(df['date'])
+        df.index.name = 'date'
+        return df[['open', 'high', 'low', 'close', 'amount', 'volume']]
 
     def read_min_data(self, market: int, code: str) -> List[pd.DataFrame]:
         """读取5分钟线数据并生成15分钟、30分钟和60分数据
@@ -241,8 +290,8 @@ class TdxDataReader:
 
             try:
                 data = self.read_daily_data(market, code)
-                # 确保datetime是列而不是索引
-                if isinstance(data.index, pd.DatetimeIndex) or data.index.name == 'datetime':
+                # 确保 date/datetime 是列而不是索引
+                if isinstance(data.index, pd.DatetimeIndex) or data.index.name in ('datetime', 'date'):
                     data = data.reset_index()
                 all_data.append(data)
             except FileNotFoundError:
