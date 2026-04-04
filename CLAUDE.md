@@ -65,6 +65,38 @@ CLI (cli.py)  → Reader (reader.py) → Processor (processor.py) → Storage (s
 代码带市场前缀：`sz000001`、`sh600000`。深圳 market=0，上海 market=1。
 A 股筛选规则：深圳 `000/001/002/300` 开头，上海 `60/688` 开头。
 
+## 首次使用初始化
+
+增量同步依赖数据库唯一约束（`ON CONFLICT DO NOTHING`）。**首次写入数据后**，必须执行一次约束脚本，否则 `save_incremental()` 不会跳过重复数据：
+
+```bash
+psql -d <dbname> -f scripts/add_constraints.sql
+```
+
+该脚本会先清理已有重复行，再添加约束。
+
 ## 配置
 
-通过 `.env` 文件配置，必填：`TDX_PATH`、`DB_TYPE`、`DB_HOST`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`。
+通过 `.env` 文件配置：
+
+| 变量 | 必填 | 说明 |
+|------|------|------|
+| `TDX_PATH` | 是 | 通达信安装目录 |
+| `DB_TYPE` | 是 | `postgresql` / `mysql` / `sqlite` |
+| `DB_HOST` | 是 | 数据库主机 |
+| `DB_NAME` | 是 | 数据库名 |
+| `DB_USER` | 是 | 数据库用户名 |
+| `DB_PASSWORD` | 是 | 数据库密码 |
+| `DB_PORT` | 否 | 默认 `5432` |
+| `DB_BATCH_SIZE` | 否 | 批量写入大小，默认 `10000` |
+| `CSV_OUTPUT_PATH` | 否 | CSV 输出目录，默认 `output/` |
+| `USE_TQDM` | 否 | 是否显示进度条，默认 `True` |
+
+**推荐使用 PostgreSQL**：`save_incremental()` 对 PostgreSQL 使用 `psycopg2.extras.execute_values` 真正批量插入（比 MySQL/SQLite 的 executemany 快 10~100x）。
+
+## sync 命令增量策略
+
+`python main.py sync` 内部行为：
+
+- **日线**：查 `MAX(date)` from `daily_data`（全局），以 `latest+1天` 为起始过滤
+- **分钟线**：逐股票查 `MAX(datetime)` from `minute5_data WHERE code=?`（按股票精确），无全局起始日期
