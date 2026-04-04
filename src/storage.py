@@ -342,8 +342,22 @@ class DataStorage:
 
                 with self.engine.connect() as conn:
                     for i in range(0, total_rows, batch_size):
-                        batch_df = df_to_save.iloc[i:i + batch_size]
-                        conn.execute(sql, batch_df.to_dict('records'))
+                        batch_df = df_to_save.iloc[i:i + batch_size].astype(object).where(
+                            df_to_save.iloc[i:i + batch_size].notna(), None
+                        )
+                        # 先转为 dict 列表，再转换 Timestamp → Python datetime
+                        # 必须在 to_dict() 之后处理：若在 DataFrame 上赋值，pandas 会把
+                        # datetime 对象重新推断为 datetime64，to_dict() 又变回 Timestamp，
+                        # 而 sqlite3 使用精确类型匹配，不识别 pd.Timestamp（datetime 子类）
+                        records = batch_df.to_dict('records')
+                        for record in records:
+                            for key in record:
+                                val = record[key]
+                                if isinstance(val, pd.Timestamp):
+                                    record[key] = val.to_pydatetime()
+                                elif val is pd.NaT:
+                                    record[key] = None
+                        conn.execute(sql, records)
                         conn.commit()
 
             logger.info(f"增量保存完成: 共处理 {total_rows} 条到表 {table_name}（重复数据已跳过）")
