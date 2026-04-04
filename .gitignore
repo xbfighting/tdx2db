@@ -45,3 +45,5 @@ poetry.lock
 output/
 
 */__pycache__/
+tdx_data.db
+.claude/

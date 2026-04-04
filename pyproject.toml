@@ -1,12 +1,16 @@
 [tool.poetry]
-name = "tdx-data-processor"
-version = "0.1.0"
-description = "一个使用pytdx读取本地股票数据并存储到数据库或CSV的程序"
-authors = ["我如此拉风 <xbfighting@hotmail.com>"]
+name = "tdx2db"
+version = "0.2.0"
+description = "从通达信本地文件同步 A 股日线数据到数据库"
+authors = ["jaden1q84 <jaden1q84@gmail.com>"]
 readme = "README.md"
+packages = [{include = "tdx2db", from = "src"}]
+
+[tool.poetry.scripts]
+tdx2db = "tdx2db.cli:main"
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = ">=3.10"
 pytdx = "^1.72"
 pandas = "^2.2.3"
 sqlalchemy = "^2.0.40"
@@ -14,6 +18,9 @@ tqdm = "^4.67.1"
 python-dotenv = "^1.1.0"
 pymysql = "^1.1.1"
 psycopg2-binary = "^2.9.10"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
 
 [[tool.poetry.source]]
 name = "aliyun"
