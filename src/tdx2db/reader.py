@@ -41,7 +41,8 @@ class TdxDataReader:
         """扫描本地 .day 文件获取 A 股股票列表（含市场前缀代码）。"""
         sz_path = self.tdx_path / 'vipdoc' / 'sz' / 'lday'
         sh_path = self.tdx_path / 'vipdoc' / 'sh' / 'lday'
-        if not (sz_path.exists() or sh_path.exists()):
+        bj_path = self.tdx_path / 'vipdoc' / 'bj' / 'lday'
+        if not (sz_path.exists() or sh_path.exists() or bj_path.exists()):
             raise FileNotFoundError("无法找到股票数据目录")
 
         stocks = []
@@ -59,23 +60,34 @@ class TdxDataReader:
                 if re.match(r'^(60\d{4}|688\d{3})$', pure):
                     stocks.append({'code': code, 'name': f'上A{code}'})
 
+        if bj_path.exists():
+            for f in bj_path.glob('*.day'):
+                code = f.stem
+                pure = code[-6:].zfill(6)
+                if re.match(r'^(8\d{5}|92\d{4})$', pure):
+                    stocks.append({'code': code, 'name': f'北A{code}'})
+
         if not stocks:
             raise FileNotFoundError("未找到任何股票数据文件")
         return pd.DataFrame(stocks, columns=['code', 'name'])
 
     def read_daily_data(self, market: int, code: str) -> pd.DataFrame:
         """读取单只股票日线数据，返回含 code/market 列的 DataFrame（date 为 DatetimeIndex）。"""
-        market_folder = 'sz' if market == 0 else 'sh'
+        market_map = {0: 'sz', 1: 'sh', 2: 'bj'}
+        market_folder = market_map[market]
         pure_code = code[-6:] if len(code) > 6 else code
         file_path = self.tdx_path / 'vipdoc' / market_folder / 'lday' / f"{market_folder}{pure_code}.day"
 
         if not file_path.exists():
             raise FileNotFoundError(f"日线数据文件不存在: {file_path}")
 
-        sec_type = self.daily_reader.get_security_type(str(file_path))
-        if sec_type in self.daily_reader.SECURITY_TYPE:
-            data = self.daily_reader.get_df(str(file_path))
-        else:
+        try:
+            sec_type = self.daily_reader.get_security_type(str(file_path))
+            if sec_type in self.daily_reader.SECURITY_TYPE:
+                data = self.daily_reader.get_df(str(file_path))
+            else:
+                data = self._read_day_file_raw(str(file_path))
+        except Exception:
             data = self._read_day_file_raw(str(file_path))
 
         data['code'] = pure_code

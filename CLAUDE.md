@@ -49,7 +49,7 @@ CLI (cli.py)  → Reader (reader.py) → Processor (processor.py) → Storage (s
 
 逐股票流式处理，不全量加载到内存：
 
-1. 读取 `vipdoc/{sz,sh}/lday/*.day` → `process_daily_data()` 校验 OHLCV + 复权
+1. 读取 `vipdoc/{sz,sh,bj}/lday/*.day` → `process_daily_data()` 校验 OHLCV + 复权
 2. 增量策略：`get_all_latest_dates()` 一次查询所有股票最新日期；若有除权事件则 `delete_stock_data()` + 全量重写
 3. `save_incremental()` 使用 `ON CONFLICT DO NOTHING`（PG）/ `INSERT OR IGNORE`（SQLite）/ `INSERT IGNORE`（MySQL）
 
@@ -64,12 +64,12 @@ CLI (cli.py)  → Reader (reader.py) → Processor (processor.py) → Storage (s
 
 ## 股票代码格式
 
-- CLI `--code` 参数：纯 6 位数字，如 `000001`、`600000`，市场自动识别
-- 内部流转层：带市场前缀，如 `sz000001`、`sh600000`（reader 内部使用）
+- CLI `--code` 参数：纯 6 位数字，如 `000001`、`600000`、`920001`，市场自动识别
+- 内部流转层：带市场前缀，如 `sz000001`、`sh600000`、`bj920001`（reader 内部使用）
 - 数据库层：纯 6 位数字，如 `000001`（reader 写入时截取）
-- 深圳 market=0，上海 market=1
-- A 股筛选：深圳 `000/001/002/300` 开头，上海 `60/688` 开头
-- 市场自动识别规则：6 开头 → 上海（sh），其他 → 深圳（sz）
+- 深圳 market=0，上海 market=1，北京 market=2
+- A 股筛选：深圳 `000/001/002/300` 开头，上海 `60/688` 开头，北交所 `8xxxxx` 或 `92xxxx` 开头
+- 市场自动识别规则：6 开头 → 上海（sh），8 或 92 开头 → 北京（bj），其他 → 深圳（sz）
 
 ## 配置
 

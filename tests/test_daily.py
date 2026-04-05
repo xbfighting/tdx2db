@@ -43,8 +43,14 @@ def make_gbbq_empty() -> pd.DataFrame:
 
 def make_gbbq_with_event(full_code: str, ex_date_int: int) -> pd.DataFrame:
     """构造一条除权记录（category=1，送股 10%）。"""
+    if full_code.startswith('sh'):
+        market_val = 1
+    elif full_code.startswith('bj'):
+        market_val = 2
+    else:
+        market_val = 0
     return pd.DataFrame([{
-        'market': 0 if full_code.startswith('sz') else 1,
+        'market': market_val,
         'code': int(full_code[2:]),
         'datetime': ex_date_int,
         'category': 1,
@@ -246,3 +252,59 @@ class TestIncrementalUpdate:
             ).fetchone()
             if adj_row:
                 assert adj_row[0] < 10.5, f"前复权后除权日前收盘价应 < 10.5，实际 {adj_row[0]}"
+
+
+# ─── 三市场测试 ──────────────────────────────────────────────────────────────
+
+class TestMultiMarket:
+    """验证三个市场（sz/sh/bj）日线数据均能正确写入，且 market 列值准确。"""
+
+    def test_all_three_markets_sync(self, tmp_path):
+        """sz=0, sh=1, bj=2 三市场股票同步后记录数和 market 值均正确。"""
+        db_url = f"sqlite:///{tmp_path}/test.db"
+        storage = DataStorage(db_url=db_url)
+        processor = DataProcessor()
+        gbbq = make_gbbq_empty()
+
+        stocks = [
+            ('sz000001', 0),   # 深圳主板
+            ('sh600000', 1),   # 上海主板
+            ('bj920001', 2),   # 北交所（92开头新股）
+        ]
+        for code, market in stocks:
+            df = make_daily_df(code, market, '2024-03-01', 10).reset_index()
+            processed = processor.process_daily_data(df, gbbq=gbbq, adj_type='none')
+            storage.save_incremental(processed, 'daily_data', conflict_columns=('stock_code', 'date'))
+
+        with storage.engine.connect() as conn:
+            from sqlalchemy import text
+            for pure_code, expected_market in [('000001', 0), ('600000', 1), ('920001', 2)]:
+                row = conn.execute(text(
+                    f"SELECT market, COUNT(*) FROM daily_data WHERE stock_code='{pure_code}' GROUP BY market"
+                )).fetchone()
+                assert row is not None, f"{pure_code} 无数据"
+                assert row[0] == expected_market, f"{pure_code} market 应为 {expected_market}，实际 {row[0]}"
+                assert row[1] == 10, f"{pure_code} 应有10条记录，实际 {row[1]}"
+
+    def test_bj_ex_rights_refresh(self, tmp_path):
+        """北交所股票有除权事件时，旧数据应被删除并重写。"""
+        db_url = f"sqlite:///{tmp_path}/test.db"
+        storage = DataStorage(db_url=db_url)
+        processor = DataProcessor()
+
+        df = make_daily_df('bj920001', 2, '2024-01-02', 20).reset_index()
+        gbbq = make_gbbq_with_event('bj920001', 20240115)
+
+        p1 = processor.process_daily_data(df, gbbq=make_gbbq_empty(), adj_type='none')
+        storage.save_incremental(p1, 'daily_data', conflict_columns=('stock_code', 'date'))
+
+        storage.delete_stock_data('920001')
+        p2 = processor.process_daily_data(df, gbbq=gbbq, adj_type='forward')
+        storage.save_incremental(p2, 'daily_data', conflict_columns=('stock_code', 'date'))
+
+        with storage.engine.connect() as conn:
+            from sqlalchemy import text
+            count = conn.execute(text(
+                "SELECT COUNT(*) FROM daily_data WHERE stock_code='920001'"
+            )).fetchone()[0]
+            assert count == 20

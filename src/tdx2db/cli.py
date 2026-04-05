@@ -17,7 +17,12 @@ def _has_ex_rights_after(code: str, gbbq: pd.DataFrame, last_date: int) -> bool:
     """检查该股票在 last_date 之后是否有除权事件（category==1）。"""
     if gbbq is None or gbbq.empty:
         return False
-    prefix = 'sh' if code.startswith('6') else 'sz'
+    if code.startswith('6'):
+        prefix = 'sh'
+    elif code.startswith('8') or code.startswith('92'):
+        prefix = 'bj'
+    else:
+        prefix = 'sz'
     full_code = prefix + code.zfill(6)
     events = gbbq[
         (gbbq['full_code'] == full_code) &
@@ -48,7 +53,7 @@ def sync_all_daily(
 
     for _, stock in iterator:
         code = stock['code']
-        market = 1 if code.startswith('sh') else 0
+        market = 1 if code.startswith('sh') else (2 if code.startswith('bj') else 0)
         pure_code = code[-6:] if len(code) > 6 else code
         last_date = latest_dates.get(pure_code)
 
@@ -176,8 +181,14 @@ def main() -> int:
 
         if args.code:
             pure_code = args.code[-6:] if len(args.code) > 6 else args.code
-            market = 1 if pure_code.startswith('6') else 0
-            code = ('sh' if market == 1 else 'sz') + pure_code
+            if pure_code.startswith('6'):
+                market = 1
+            elif pure_code.startswith('8') or pure_code.startswith('92'):
+                market = 2
+            else:
+                market = 0
+            prefix = {0: 'sz', 1: 'sh', 2: 'bj'}[market]
+            code = prefix + pure_code
             try:
                 data = reader.read_daily_data(market, code)
                 if isinstance(data.index, pd.DatetimeIndex) or data.index.name in ('date', 'datetime'):
