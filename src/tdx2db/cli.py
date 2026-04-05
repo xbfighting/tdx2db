@@ -22,7 +22,7 @@ def _has_ex_rights_after(code: str, gbbq: pd.DataFrame, last_date: int) -> bool:
     events = gbbq[
         (gbbq['full_code'] == full_code) &
         (gbbq['category'] == 1) &
-        (gbbq['datetime'] > last_date)
+        (gbbq['datetime'] > int(last_date))
     ]
     return not events.empty
 
@@ -70,9 +70,9 @@ def sync_all_daily(
             if incremental and last_date and not needs_refresh:
                 processed = processed[processed['date'] > last_date]
             if start_date:
-                processed = processed[processed['date'] >= start_date]
+                processed = processed[processed['date'] >= str(start_date)]
             if end_date:
-                processed = processed[processed['date'] <= end_date]
+                processed = processed[processed['date'] <= str(end_date)]
 
             if processed.empty:
                 stats['success'] += 1
@@ -80,7 +80,7 @@ def sync_all_daily(
 
             if needs_refresh:
                 storage.delete_stock_data(pure_code)
-            storage.save_incremental(processed, 'daily_data', conflict_columns=('code', 'date'),
+            storage.save_incremental(processed, 'daily_data', conflict_columns=('stock_code', 'date'),
                                      batch_size=config.db_batch_size)
             stats['success'] += 1
 
@@ -185,7 +185,7 @@ def main() -> int:
                 processed = processor.process_daily_data(data, gbbq=gbbq, adj_type=adj_type)
                 processed = processor.filter_data(processed, start_date=args.start, end_date=args.end)
                 if not processed.empty:
-                    storage.save_incremental(processed, 'daily_data', conflict_columns=('code', 'date'))
+                    storage.save_incremental(processed, 'daily_data', conflict_columns=('stock_code', 'date'))
             except Exception as e:
                 logger.error(f"同步 {code} 出错: {e}")
                 return 1

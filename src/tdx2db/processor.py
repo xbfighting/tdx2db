@@ -177,12 +177,15 @@ class DataProcessor:
         elif 'adj_factor' not in processed.columns:
             processed['adj_factor'] = 1.0
 
-        # 日期转 YYYYMMDD 整数
-        processed['date'] = processed['date'].dt.strftime('%Y%m%d').astype(int)
+        # 日期转 YYYYMMDD 字符串
+        processed['date'] = processed['date'].dt.strftime('%Y%m%d')
 
         # 预留 turnover_rate 列
         if 'turnover_rate' not in processed.columns:
             processed['turnover_rate'] = None
+
+        # 重命名 code → stock_code 以对齐目标表结构
+        processed = processed.rename(columns={'code': 'stock_code'})
 
         return processed
 
@@ -199,9 +202,9 @@ class DataProcessor:
         result = df.copy()
         if 'date' in result.columns:
             if start_date:
-                result = result[result['date'] >= start_date]
+                result = result[result['date'] >= str(start_date)]
             if end_date:
-                result = result[result['date'] <= end_date]
-        if codes and 'code' in result.columns:
-            result = result[result['code'].isin(codes)]
+                result = result[result['date'] <= str(end_date)]
+        if codes and 'stock_code' in result.columns:
+            result = result[result['stock_code'].isin(codes)]
         return result

@@ -74,7 +74,7 @@ class TdxDailySync:
         processed = self.processor.filter_data(processed, start_date=start_date, end_date=end_date)
         if processed.empty:
             return 0
-        return self.storage.save_incremental(processed, 'daily_data', conflict_columns=('code', 'date'))
+        return self.storage.save_incremental(processed, 'daily_data', conflict_columns=('stock_code', 'date'))
 
     def sync_stock_list(self) -> int:
         """同步股票列表到 stock_info 表，返回股票数量。"""
@@ -91,14 +91,14 @@ class TdxDailySync:
         """从数据库查询日线数据，date 列为 YYYYMMDD 整数。"""
         from sqlalchemy import text
         pure_code = code[-6:] if len(code) > 6 else code
-        conditions = ["code = :code"]
+        conditions = ["stock_code = :code"]
         params: dict = {"code": pure_code}
         if start_date:
             conditions.append("date >= :start_date")
-            params["start_date"] = start_date
+            params["start_date"] = str(start_date)
         if end_date:
             conditions.append("date <= :end_date")
-            params["end_date"] = end_date
+            params["end_date"] = str(end_date)
         where = " AND ".join(conditions)
         sql = text(f"SELECT * FROM daily_data WHERE {where} ORDER BY date")
         with self.storage.engine.connect() as conn:

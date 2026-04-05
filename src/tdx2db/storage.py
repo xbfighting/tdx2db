@@ -14,12 +14,12 @@ Base = declarative_base()
 
 class DailyData(Base):
     __tablename__ = 'daily_data'
-    __table_args__ = (UniqueConstraint('code', 'date'),)
+    __table_args__ = (UniqueConstraint('stock_code', 'date'),)
 
     id = Column(Integer, primary_key=True)
-    code = Column(String(10), index=True)
+    stock_code = Column(String(10), index=True)
     market = Column(Integer)
-    date = Column(Integer, index=True)   # YYYYMMDD 整数
+    date = Column(String(8), index=True)   # YYYYMMDD 字符串
     open = Column(Float)
     high = Column(Float)
     low = Column(Float)
@@ -51,27 +51,27 @@ class DataStorage:
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
 
-    def get_latest_date_by_code(self, code: str) -> Optional[int]:
-        """返回指定股票在 daily_data 中最新的 YYYYMMDD 整数日期，无数据返回 None。"""
+    def get_latest_date_by_code(self, code: str) -> Optional[str]:
+        """返回指定股票在 daily_data 中最新的 YYYYMMDD 字符串日期，无数据返回 None。"""
         try:
             with self.engine.connect() as conn:
                 row = conn.execute(
-                    text("SELECT MAX(date) FROM daily_data WHERE code = :code"),
+                    text("SELECT MAX(date) FROM daily_data WHERE stock_code = :code"),
                     {"code": code}
                 ).fetchone()
-                return int(row[0]) if row and row[0] is not None else None
+                return row[0] if row and row[0] is not None else None
         except Exception as e:
             logger.debug(f"查询 {code} 最新日期出错: {e}")
             return None
 
     def get_all_latest_dates(self) -> dict:
-        """一次查询返回所有股票最新日期 {code: YYYYMMDD int}。"""
+        """一次查询返回所有股票最新日期 {code: YYYYMMDD str}。"""
         try:
             with self.engine.connect() as conn:
                 rows = conn.execute(
-                    text("SELECT code, MAX(date) FROM daily_data GROUP BY code")
+                    text("SELECT stock_code, MAX(date) FROM daily_data GROUP BY stock_code")
                 ).fetchall()
-                return {r[0]: int(r[1]) for r in rows if r[1] is not None}
+                return {r[0]: r[1] for r in rows if r[1] is not None}
         except Exception as e:
             logger.debug(f"查询所有股票最新日期出错: {e}")
             return {}
@@ -81,7 +81,7 @@ class DataStorage:
         try:
             with self.engine.connect() as conn:
                 conn.execute(
-                    text("DELETE FROM daily_data WHERE code = :code"),
+                    text("DELETE FROM daily_data WHERE stock_code = :code"),
                     {"code": code}
                 )
                 conn.commit()
@@ -92,7 +92,7 @@ class DataStorage:
         self,
         df: pd.DataFrame,
         table_name: str,
-        conflict_columns: Tuple[str, ...] = ('code', 'date'),
+        conflict_columns: Tuple[str, ...] = ('stock_code', 'date'),
         batch_size: int = 10000
     ) -> int:
         """增量保存，跳过重复记录（ON CONFLICT DO NOTHING / INSERT OR IGNORE / INSERT IGNORE）。"""

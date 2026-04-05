@@ -76,7 +76,7 @@ class TestFullSyncOneMonth:
             df = make_daily_df(code, market, '2024-03-01', 20)
             df = df.reset_index()
             processed = processor.process_daily_data(df, gbbq=gbbq, adj_type='none')
-            storage.save_incremental(processed, 'daily_data', conflict_columns=('code', 'date'))
+            storage.save_incremental(processed, 'daily_data', conflict_columns=('stock_code', 'date'))
 
         # 验证
         with storage.engine.connect() as conn:
@@ -84,10 +84,10 @@ class TestFullSyncOneMonth:
             rows = conn.execute(text("SELECT COUNT(*) FROM daily_data")).fetchone()
             assert rows[0] == 60, f"期望60条，实际{rows[0]}"
 
-            # date 列应为 YYYYMMDD 整数
+            # date 列应为 YYYYMMDD 字符串
             sample = conn.execute(text("SELECT date FROM daily_data LIMIT 1")).fetchone()
-            assert isinstance(sample[0], int), f"date 应为整数，实际类型: {type(sample[0])}"
-            assert 20240301 <= sample[0] <= 20241231
+            assert isinstance(sample[0], str), f"date 应为字符串，实际类型: {type(sample[0])}"
+            assert '20240301' <= sample[0] <= '20241231'
 
 
 class TestSingleStockOneYear:
@@ -111,10 +111,10 @@ class TestSingleStockOneYear:
         with storage.engine.connect() as conn:
             from sqlalchemy import text
             rows = conn.execute(
-                text("SELECT MIN(date), MAX(date), COUNT(*) FROM daily_data WHERE code='000001'")
+                text("SELECT MIN(date), MAX(date), COUNT(*) FROM daily_data WHERE stock_code='000001'")
             ).fetchone()
             min_date, max_date, count = rows
-            assert min_date >= 20240101, f"最小日期 {min_date} 应 >= 20240101"
+            assert min_date >= '20240101', f"最小日期 {min_date} 应 >= 20240101"
             assert count > 0
 
 
@@ -133,7 +133,7 @@ class TestForwardAdjPrice:
         gbbq = make_gbbq_with_event('sz000001', 20240201)
         processed = processor.process_daily_data(df, gbbq=gbbq, adj_type='forward')
 
-        ex_date = 20240201
+        ex_date = '20240201'
         before = processed[processed['date'] < ex_date]
         on_or_after = processed[processed['date'] >= ex_date]
 
@@ -182,7 +182,7 @@ class TestIncrementalUpdate:
         with storage.engine.connect() as conn:
             from sqlalchemy import text
             count = conn.execute(
-                text("SELECT COUNT(*) FROM daily_data WHERE code='000001'")
+                text("SELECT COUNT(*) FROM daily_data WHERE stock_code='000001'")
             ).fetchone()[0]
             assert count == 20, f"重复同步后应仍为20条，实际{count}"
 
@@ -209,7 +209,7 @@ class TestIncrementalUpdate:
         with storage.engine.connect() as conn:
             from sqlalchemy import text
             count = conn.execute(
-                text("SELECT COUNT(*) FROM daily_data WHERE code='000001'")
+                text("SELECT COUNT(*) FROM daily_data WHERE stock_code='000001'")
             ).fetchone()[0]
             assert count == 25, f"增量后应为25条，实际{count}"
 
@@ -235,14 +235,14 @@ class TestIncrementalUpdate:
         with storage.engine.connect() as conn:
             from sqlalchemy import text
             count = conn.execute(
-                text("SELECT COUNT(*) FROM daily_data WHERE code='000001'")
+                text("SELECT COUNT(*) FROM daily_data WHERE stock_code='000001'")
             ).fetchone()[0]
             # 重写后记录数应与原始相同
             assert count == 20, f"全量重写后应为20条，实际{count}"
 
             # 除权日前的价格应已被调整（< 10.5）
             adj_row = conn.execute(
-                text("SELECT close FROM daily_data WHERE code='000001' AND date < 20240115 ORDER BY date DESC LIMIT 1")
+                text("SELECT close FROM daily_data WHERE stock_code='000001' AND date < '20240115' ORDER BY date DESC LIMIT 1")
             ).fetchone()
             if adj_row:
                 assert adj_row[0] < 10.5, f"前复权后除权日前收盘价应 < 10.5，实际 {adj_row[0]}"
