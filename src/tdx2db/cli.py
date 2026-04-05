@@ -114,7 +114,7 @@ def parse_args() -> Namespace:
 
     # daily
     daily = subparsers.add_parser('daily', help='同步日线数据')
-    daily.add_argument('--code', help='股票代码（含市场前缀，如 sz000001），不指定则全量')
+    daily.add_argument('--code', help='股票代码（6位数字，如 000001），不指定则全量，市场自动识别')
     daily.add_argument('--start', type=int, help='开始日期 YYYYMMDD')
     daily.add_argument('--end', type=int, help='结束日期 YYYYMMDD')
     daily.add_argument('--adj', choices=['forward', 'backward', 'none'], default='forward')
@@ -175,8 +175,9 @@ def main() -> int:
         gbbq = reader.read_gbbq()
 
         if args.code:
-            code = args.code
-            market = 1 if code.startswith('sh') else 0
+            pure_code = args.code[-6:] if len(args.code) > 6 else args.code
+            market = 1 if pure_code.startswith('6') else 0
+            code = ('sh' if market == 1 else 'sz') + pure_code
             try:
                 data = reader.read_daily_data(market, code)
                 if isinstance(data.index, pd.DatetimeIndex) or data.index.name in ('date', 'datetime'):
@@ -186,7 +187,7 @@ def main() -> int:
                 if not processed.empty:
                     storage.save_incremental(processed, 'daily_data', conflict_columns=('code', 'date'))
             except Exception as e:
-                logger.error(f"同步 {args.code} 出错: {e}")
+                logger.error(f"同步 {code} 出错: {e}")
                 return 1
         else:
             incremental = getattr(args, 'incremental', False)

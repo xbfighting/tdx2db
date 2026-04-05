@@ -19,7 +19,7 @@ python main.py sync
 
 # 单独同步
 python main.py daily --incremental
-python main.py daily --code sz000001 --start 20240101
+python main.py daily --code 000001 --start 20240101
 
 # 同步股票列表
 python main.py stock-list
@@ -64,10 +64,12 @@ CLI (cli.py)  → Reader (reader.py) → Processor (processor.py) → Storage (s
 
 ## 股票代码格式
 
-- 文件/CLI 层：带市场前缀，如 `sz000001`、`sh600000`
+- CLI `--code` 参数：纯 6 位数字，如 `000001`、`600000`，市场自动识别
+- 内部流转层：带市场前缀，如 `sz000001`、`sh600000`（reader 内部使用）
 - 数据库层：纯 6 位数字，如 `000001`（reader 写入时截取）
 - 深圳 market=0，上海 market=1
 - A 股筛选：深圳 `000/001/002/300` 开头，上海 `60/688` 开头
+- 市场自动识别规则：6 开头 → 上海（sh），其他 → 深圳（sz）
 
 ## 配置
 

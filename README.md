@@ -47,8 +47,8 @@ python main.py sync
 # 同步所有股票日线（全量）
 python main.py daily
 
-# 同步指定股票
-python main.py daily --code sz000001
+# 同步指定股票（6位代码，自动识别市场）
+python main.py daily --code 000001
 
 # 指定日期范围
 python main.py daily --start 20240101 --end 20241231
@@ -77,10 +77,10 @@ sync = TdxDailySync(
 sync.sync_all(adj_type='forward')
 
 # 同步单只股票
-sync.sync_stock('sz000001', start_date=20240101)
+sync.sync_stock('000001', start_date=20240101)
 
 # 查询数据
-df = sync.get_daily('sz000001', start_date=20240101, end_date=20241231)
+df = sync.get_daily('000001', start_date=20240101, end_date=20241231)
 print(df.head())
 ```
 
