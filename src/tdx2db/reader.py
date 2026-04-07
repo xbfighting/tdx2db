@@ -47,39 +47,36 @@ class TdxDataReader:
             logger.warning(f"读取权息文件时出错: {e}，将跳过复权处理")
             return pd.DataFrame()
 
-    def get_stock_list(self) -> pd.DataFrame:
-        """扫描本地 .day 文件获取 A 股股票列表（含市场前缀代码）。"""
+    def get_stock_list(self) -> list:
+        """扫描本地 .day 文件，返回有数据的股票代码列表（000001.SZ 格式）。"""
         sz_path = self._vipdoc_path / 'sz' / 'lday'
         sh_path = self._vipdoc_path / 'sh' / 'lday'
         bj_path = self._vipdoc_path / 'bj' / 'lday'
         if not (sz_path.exists() or sh_path.exists() or bj_path.exists()):
             raise FileNotFoundError("无法找到股票数据目录")
 
-        stocks = []
+        codes = []
         if sz_path.exists():
             for f in sz_path.glob('*.day'):
-                code = f.stem
-                pure = code[-6:].zfill(6)
+                pure = f.stem[-6:].zfill(6)
                 if re.match(r'^(000|001|002|300)\d{3}$', pure):
-                    stocks.append({'code': code, 'name': f'深A{code}'})
+                    codes.append(pure + '.SZ')
 
         if sh_path.exists():
             for f in sh_path.glob('*.day'):
-                code = f.stem
-                pure = code[-6:].zfill(6)
+                pure = f.stem[-6:].zfill(6)
                 if re.match(r'^(60\d{4}|688\d{3})$', pure):
-                    stocks.append({'code': code, 'name': f'上A{code}'})
+                    codes.append(pure + '.SH')
 
         if bj_path.exists():
             for f in bj_path.glob('*.day'):
-                code = f.stem
-                pure = code[-6:].zfill(6)
+                pure = f.stem[-6:].zfill(6)
                 if re.match(r'^(8\d{5}|92\d{4})$', pure):
-                    stocks.append({'code': code, 'name': f'北A{code}'})
+                    codes.append(pure + '.BJ')
 
-        if not stocks:
+        if not codes:
             raise FileNotFoundError("未找到任何股票数据文件")
-        return pd.DataFrame(stocks, columns=['code', 'name'])
+        return codes
 
     def read_daily_data(self, market: int, code: str) -> pd.DataFrame:
         """读取单只股票日线数据，返回含 code/market 列的 DataFrame（date 为 DatetimeIndex）。"""

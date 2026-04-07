@@ -32,12 +32,10 @@ class DailyData(Base):
 
 class StockInfo(Base):
     __tablename__ = 'stock_info'
-    __table_args__ = (UniqueConstraint('code'),)
+    __table_args__ = (UniqueConstraint('stock_code'),)
 
-    id = Column(Integer, primary_key=True)
-    code = Column(String(10), index=True)
-    name = Column(String(50))
-    market = Column(Integer)
+    stock_code = Column(String(12), primary_key=True)  # 000001.SZ
+    stock_name = Column(String(50))
 
 
 _VALID_TABLES = frozenset({'daily_data', 'stock_info'})
@@ -155,8 +153,36 @@ class DataStorage:
             raw_conn.close()
 
     def save_stock_info(self, df: pd.DataFrame) -> bool:
-        """保存股票列表到 stock_info 表（增量，跳过重复）。"""
-        return self.save_incremental(df, 'stock_info', conflict_columns=('code',)) > 0
+        """保存股票列表到 stock_info 表（upsert，名称可更新）。"""
+        if df.empty:
+            return False
+        try:
+            with self.engine.connect() as conn:
+                if self._db_type == 'postgresql':
+                    sql = text("""
+                        INSERT INTO stock_info (stock_code, stock_name)
+                        VALUES (:stock_code, :stock_name)
+                        ON CONFLICT (stock_code) DO UPDATE SET stock_name = EXCLUDED.stock_name
+                    """)
+                elif self._db_type == 'mysql':
+                    sql = text("""
+                        INSERT INTO stock_info (stock_code, stock_name)
+                        VALUES (:stock_code, :stock_name)
+                        ON DUPLICATE KEY UPDATE stock_name = VALUES(stock_name)
+                    """)
+                else:  # sqlite
+                    sql = text("""
+                        INSERT INTO stock_info (stock_code, stock_name)
+                        VALUES (:stock_code, :stock_name)
+                        ON CONFLICT (stock_code) DO UPDATE SET stock_name = excluded.stock_name
+                    """)
+                conn.execute(sql, df.to_dict('records'))
+                conn.commit()
+            logger.debug(f"stock_info upsert 完成: {len(df)} 条")
+            return True
+        except Exception as e:
+            logger.error(f"保存 stock_info 出错: {e}")
+            return False
 
     def save_to_csv(self, df: pd.DataFrame, filename: str, csv_path: Optional[str] = None) -> Optional[str]:
         path = Path(csv_path or config.csv_output_path)

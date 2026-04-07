@@ -50,14 +50,12 @@ def sync_all_daily(
     latest_dates = storage.get_all_latest_dates() if incremental else {}
     stats = {'total': len(stocks), 'success': 0, 'failed': 0}
 
-    iterator = tqdm(stocks.iterrows(), total=len(stocks), desc="同步日线") if config.use_tqdm else stocks.iterrows()
+    iterator = tqdm(stocks, total=len(stocks), desc="同步日线") if config.use_tqdm else stocks
 
-    for _, stock in iterator:
-        code = stock['code']
-        market = 1 if code.startswith('sh') else (2 if code.startswith('bj') else 0)
-        pure_code = code[-6:] if len(code) > 6 else code
-        suffix = {0: '.SZ', 1: '.SH', 2: '.BJ'}[market]
-        db_code = pure_code + suffix
+    for db_code in iterator:
+        pure_code, suffix = db_code.split('.')
+        market = {'SZ': 0, 'SH': 1, 'BJ': 2}[suffix]
+        code = suffix.lower() + pure_code  # sz000001，供 read_daily_data 使用
         last_date = latest_dates.get(db_code)
 
         try:
@@ -199,9 +197,26 @@ def main() -> int:
 
     if args.command == 'stock-list':
         try:
-            stocks = reader.get_stock_list()
-            logger.info(f"获取到 {len(stocks)} 只股票")
-            storage.save_stock_info(stocks)
+            import akshare as ak
+
+            ak_df = ak.stock_info_a_code_name()  # columns: code, name（code 为纯6位）
+
+            def _add_suffix(code: str) -> str:
+                if code.startswith('6'):
+                    return code + '.SH'
+                elif code.startswith('8') or code.startswith('92'):
+                    return code + '.BJ'
+                return code + '.SZ'
+
+            ak_map = {_add_suffix(row['code']): row['name'] for _, row in ak_df.iterrows()}
+
+            local_codes = reader.get_stock_list()
+            df = pd.DataFrame([
+                {'stock_code': c, 'stock_name': ak_map.get(c, c)}
+                for c in local_codes
+            ])
+            logger.info(f"获取到 {len(df)} 只股票")
+            storage.save_stock_info(df)
         except Exception as e:
             logger.error(f"同步股票列表出错: {e}")
             return 1
