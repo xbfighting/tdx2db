@@ -1,9 +1,10 @@
+import datetime
 import os
 from pathlib import Path
 from typing import Optional, Tuple
 
 import pandas as pd
-from sqlalchemy import create_engine, Column, Integer, Float, String, UniqueConstraint, text
+from sqlalchemy import create_engine, Column, Integer, Float, String, UniqueConstraint, text, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from .config import config
@@ -36,6 +37,15 @@ class StockInfo(Base):
 
     stock_code = Column(String(12), primary_key=True)  # 000001.SZ
     stock_name = Column(String(50))
+
+
+class KlineStatistics(Base):
+    __tablename__ = 'kline_statistics'
+
+    id          = Column(Integer, primary_key=True)
+    stock_count = Column(Integer)
+    total_rows  = Column(Integer)
+    sync_time   = Column(DateTime)
 
 
 _VALID_TABLES = frozenset({'daily_data', 'stock_info'})
@@ -183,6 +193,28 @@ class DataStorage:
         except Exception as e:
             logger.error(f"保存 stock_info 出错: {e}")
             return False
+
+    def save_sync_statistics(self, stock_count: int) -> None:
+        """同步完成后写入一条统计记录到 kline_statistics。"""
+        try:
+            with self.engine.connect() as conn:
+                row = conn.execute(text("SELECT COUNT(*) FROM daily_data")).fetchone()
+                total_rows = row[0] if row else 0
+                conn.execute(
+                    text(
+                        "INSERT INTO kline_statistics (stock_count, total_rows, sync_time) "
+                        "VALUES (:stock_count, :total_rows, :sync_time)"
+                    ),
+                    {
+                        "stock_count": stock_count,
+                        "total_rows": total_rows,
+                        "sync_time": datetime.datetime.now(),
+                    }
+                )
+                conn.commit()
+            logger.info(f"统计已记录: stock_count={stock_count}, total_rows={total_rows}")
+        except Exception as e:
+            logger.error(f"写入 kline_statistics 出错: {e}")
 
     def save_to_csv(self, df: pd.DataFrame, filename: str, csv_path: Optional[str] = None) -> Optional[str]:
         path = Path(csv_path or config.csv_output_path)

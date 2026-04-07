@@ -185,8 +185,9 @@ def main() -> int:
         logger.info("=== 开始联网下载 TDX 日线数据 ===")
         with download_and_extract(url=url, keep_tmp=keep_tmp) as vipdoc_path:
             dl_reader = TdxDataReader(vipdoc_path=str(vipdoc_path))
-            sync_all_daily(dl_reader, processor, storage, gbbq,
+            stats = sync_all_daily(dl_reader, processor, storage, gbbq,
                            adj_type=adj_type, incremental=True)
+        storage.save_sync_statistics(stats['success'])
         return 0
 
     try:
@@ -248,16 +249,18 @@ def main() -> int:
                 return 1
         else:
             incremental = getattr(args, 'incremental', False)
-            sync_all_daily(reader, processor, storage, gbbq,
+            stats = sync_all_daily(reader, processor, storage, gbbq,
                            adj_type=adj_type, incremental=incremental,
                            start_date=args.start, end_date=args.end)
+            storage.save_sync_statistics(stats['success'])
 
     elif args.command == 'sync':
         adj_type = getattr(args, 'adj', 'forward')
         logger.info("=== 开始增量同步日线数据 ===")
         gbbq = reader.read_gbbq()
-        sync_all_daily(reader, processor, storage, gbbq,
+        stats = sync_all_daily(reader, processor, storage, gbbq,
                        adj_type=adj_type, incremental=True)
+        storage.save_sync_statistics(stats['success'])
 
     else:
         logger.error("请指定子命令，使用 -h 查看帮助")
