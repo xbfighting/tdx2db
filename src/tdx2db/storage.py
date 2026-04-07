@@ -17,7 +17,7 @@ class DailyData(Base):
     __table_args__ = (UniqueConstraint('stock_code', 'date'),)
 
     id = Column(Integer, primary_key=True)
-    stock_code = Column(String(10), index=True)
+    stock_code = Column(String(12), index=True)
     market = Column(Integer)
     date = Column(String(8), index=True)   # YYYYMMDD 字符串
     open = Column(Float)

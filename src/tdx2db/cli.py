@@ -56,7 +56,9 @@ def sync_all_daily(
         code = stock['code']
         market = 1 if code.startswith('sh') else (2 if code.startswith('bj') else 0)
         pure_code = code[-6:] if len(code) > 6 else code
-        last_date = latest_dates.get(pure_code)
+        suffix = {0: '.SZ', 1: '.SH', 2: '.BJ'}[market]
+        db_code = pure_code + suffix
+        last_date = latest_dates.get(db_code)
 
         try:
             data = reader.read_daily_data(market, code)
@@ -85,7 +87,7 @@ def sync_all_daily(
                 continue
 
             if needs_refresh:
-                storage.delete_stock_data(pure_code)
+                storage.delete_stock_data(db_code)
             storage.save_incremental(processed, 'daily_data', conflict_columns=('stock_code', 'date'),
                                      batch_size=config.db_batch_size)
             stats['success'] += 1

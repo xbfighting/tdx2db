@@ -90,9 +90,19 @@ class TdxDailySync:
     ) -> pd.DataFrame:
         """从数据库查询日线数据，date 列为 YYYYMMDD 整数。"""
         from sqlalchemy import text
-        pure_code = code[-6:] if len(code) > 6 else code
+        if '.' in code:
+            db_code = code.upper()
+        else:
+            pure = code[-6:] if len(code) > 6 else code
+            if pure.startswith('6'):
+                suffix = '.SH'
+            elif pure.startswith('8') or pure.startswith('92'):
+                suffix = '.BJ'
+            else:
+                suffix = '.SZ'
+            db_code = pure + suffix
         conditions = ["stock_code = :code"]
-        params: dict = {"code": pure_code}
+        params: dict = {"code": db_code}
         if start_date:
             conditions.append("date >= :start_date")
             params["start_date"] = str(start_date)

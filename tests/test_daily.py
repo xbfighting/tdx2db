@@ -112,12 +112,12 @@ class TestSingleStockOneYear:
 
         # 按日期过滤：只取 20240101 之后
         filtered = processor.filter_data(processed, start_date=20240101)
-        storage.save_incremental(filtered, 'daily_data', conflict_columns=('code', 'date'))
+        storage.save_incremental(filtered, 'daily_data', conflict_columns=('stock_code', 'date'))
 
         with storage.engine.connect() as conn:
             from sqlalchemy import text
             rows = conn.execute(
-                text("SELECT MIN(date), MAX(date), COUNT(*) FROM daily_data WHERE stock_code='000001'")
+                text("SELECT MIN(date), MAX(date), COUNT(*) FROM daily_data WHERE stock_code='000001.SZ'")
             ).fetchone()
             min_date, max_date, count = rows
             assert min_date >= '20240101', f"最小日期 {min_date} 应 >= 20240101"
@@ -180,15 +180,15 @@ class TestIncrementalUpdate:
         # 第一次同步：20个交易日
         df1 = make_daily_df('sz000001', 0, '2024-01-02', 20).reset_index()
         p1 = processor.process_daily_data(df1, gbbq=gbbq, adj_type='none')
-        storage.save_incremental(p1, 'daily_data', conflict_columns=('code', 'date'))
+        storage.save_incremental(p1, 'daily_data', conflict_columns=('stock_code', 'date'))
 
         # 第二次同步：同样的数据（模拟重复运行）
-        storage.save_incremental(p1, 'daily_data', conflict_columns=('code', 'date'))
+        storage.save_incremental(p1, 'daily_data', conflict_columns=('stock_code', 'date'))
 
         with storage.engine.connect() as conn:
             from sqlalchemy import text
             count = conn.execute(
-                text("SELECT COUNT(*) FROM daily_data WHERE stock_code='000001'")
+                text("SELECT COUNT(*) FROM daily_data WHERE stock_code='000001.SZ'")
             ).fetchone()[0]
             assert count == 20, f"重复同步后应仍为20条，实际{count}"
 
@@ -201,21 +201,21 @@ class TestIncrementalUpdate:
         # 第一次：前10个交易日
         df1 = make_daily_df('sz000001', 0, '2024-01-02', 10).reset_index()
         p1 = processor.process_daily_data(df1, gbbq=gbbq, adj_type='none')
-        storage.save_incremental(p1, 'daily_data', conflict_columns=('code', 'date'))
+        storage.save_incremental(p1, 'daily_data', conflict_columns=('stock_code', 'date'))
 
-        last_date = storage.get_latest_date_by_code('000001')
+        last_date = storage.get_latest_date_by_code('000001.SZ')
         assert last_date is not None
 
         # 第二次：后10个交易日（增量，只取 last_date 之后）
         df2 = make_daily_df('sz000001', 0, '2024-01-02', 25).reset_index()
         p2 = processor.process_daily_data(df2, gbbq=gbbq, adj_type='none')
         p2_new = p2[p2['date'] > last_date]
-        storage.save_incremental(p2_new, 'daily_data', conflict_columns=('code', 'date'))
+        storage.save_incremental(p2_new, 'daily_data', conflict_columns=('stock_code', 'date'))
 
         with storage.engine.connect() as conn:
             from sqlalchemy import text
             count = conn.execute(
-                text("SELECT COUNT(*) FROM daily_data WHERE stock_code='000001'")
+                text("SELECT COUNT(*) FROM daily_data WHERE stock_code='000001.SZ'")
             ).fetchone()[0]
             assert count == 25, f"增量后应为25条，实际{count}"
 
@@ -229,26 +229,26 @@ class TestIncrementalUpdate:
         df = make_daily_df('sz000001', 0, '2024-01-02', 20).reset_index()
         gbbq_empty = make_gbbq_empty()
         p1 = processor.process_daily_data(df, gbbq=gbbq_empty, adj_type='none')
-        storage.save_incremental(p1, 'daily_data', conflict_columns=('code', 'date'))
+        storage.save_incremental(p1, 'daily_data', conflict_columns=('stock_code', 'date'))
 
         # 模拟发现除权事件 → 删除旧数据 + 重写前复权数据
         gbbq = make_gbbq_with_event('sz000001', 20240115)
         p2 = processor.process_daily_data(df, gbbq=gbbq, adj_type='forward')
 
-        storage.delete_stock_data('000001')
-        storage.save_incremental(p2, 'daily_data', conflict_columns=('code', 'date'))
+        storage.delete_stock_data('000001.SZ')
+        storage.save_incremental(p2, 'daily_data', conflict_columns=('stock_code', 'date'))
 
         with storage.engine.connect() as conn:
             from sqlalchemy import text
             count = conn.execute(
-                text("SELECT COUNT(*) FROM daily_data WHERE stock_code='000001'")
+                text("SELECT COUNT(*) FROM daily_data WHERE stock_code='000001.SZ'")
             ).fetchone()[0]
             # 重写后记录数应与原始相同
             assert count == 20, f"全量重写后应为20条，实际{count}"
 
             # 除权日前的价格应已被调整（< 10.5）
             adj_row = conn.execute(
-                text("SELECT close FROM daily_data WHERE stock_code='000001' AND date < '20240115' ORDER BY date DESC LIMIT 1")
+                text("SELECT close FROM daily_data WHERE stock_code='000001.SZ' AND date < '20240115' ORDER BY date DESC LIMIT 1")
             ).fetchone()
             if adj_row:
                 assert adj_row[0] < 10.5, f"前复权后除权日前收盘价应 < 10.5，实际 {adj_row[0]}"
@@ -278,13 +278,13 @@ class TestMultiMarket:
 
         with storage.engine.connect() as conn:
             from sqlalchemy import text
-            for pure_code, expected_market in [('000001', 0), ('600000', 1), ('920001', 2)]:
+            for db_code, expected_market in [('000001.SZ', 0), ('600000.SH', 1), ('920001.BJ', 2)]:
                 row = conn.execute(text(
-                    f"SELECT market, COUNT(*) FROM daily_data WHERE stock_code='{pure_code}' GROUP BY market"
+                    f"SELECT market, COUNT(*) FROM daily_data WHERE stock_code='{db_code}' GROUP BY market"
                 )).fetchone()
-                assert row is not None, f"{pure_code} 无数据"
-                assert row[0] == expected_market, f"{pure_code} market 应为 {expected_market}，实际 {row[0]}"
-                assert row[1] == 10, f"{pure_code} 应有10条记录，实际 {row[1]}"
+                assert row is not None, f"{db_code} 无数据"
+                assert row[0] == expected_market, f"{db_code} market 应为 {expected_market}，实际 {row[0]}"
+                assert row[1] == 10, f"{db_code} 应有10条记录，实际 {row[1]}"
 
     def test_bj_ex_rights_refresh(self, tmp_path):
         """北交所股票有除权事件时，旧数据应被删除并重写。"""
@@ -298,13 +298,13 @@ class TestMultiMarket:
         p1 = processor.process_daily_data(df, gbbq=make_gbbq_empty(), adj_type='none')
         storage.save_incremental(p1, 'daily_data', conflict_columns=('stock_code', 'date'))
 
-        storage.delete_stock_data('920001')
+        storage.delete_stock_data('920001.BJ')
         p2 = processor.process_daily_data(df, gbbq=gbbq, adj_type='forward')
         storage.save_incremental(p2, 'daily_data', conflict_columns=('stock_code', 'date'))
 
         with storage.engine.connect() as conn:
             from sqlalchemy import text
             count = conn.execute(text(
-                "SELECT COUNT(*) FROM daily_data WHERE stock_code='920001'"
+                "SELECT COUNT(*) FROM daily_data WHERE stock_code='920001.BJ'"
             )).fetchone()[0]
             assert count == 20

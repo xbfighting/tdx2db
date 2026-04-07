@@ -184,8 +184,13 @@ class DataProcessor:
         if 'turnover_rate' not in processed.columns:
             processed['turnover_rate'] = None
 
-        # 重命名 code → stock_code 以对齐目标表结构
-        processed = processed.rename(columns={'code': 'stock_code'})
+        # 生成带市场后缀的 stock_code，如 000001.SZ / 600000.SH / 920001.BJ
+        _suffix_map = {0: '.SZ', 1: '.SH', 2: '.BJ'}
+        processed['stock_code'] = (
+            processed['code'].astype(str).str.zfill(6)
+            + processed['market'].map(_suffix_map).fillna('.SZ')
+        )
+        processed = processed.drop(columns=['code'])
 
         return processed
 
