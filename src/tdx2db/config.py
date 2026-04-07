@@ -15,6 +15,7 @@ class Config:
     db_password: str
     db_batch_size: int
     use_tqdm: bool
+    download_url: str
 
     def __init__(self) -> None:
         self.tdx_path = os.getenv('TDX_PATH', '')
@@ -27,6 +28,7 @@ class Config:
         self.db_password = os.getenv('DB_PASSWORD', '')
         self.db_batch_size = int(os.getenv('DB_BATCH_SIZE', '10000'))
         self.use_tqdm = os.getenv('USE_TQDM', 'True').lower() == 'true'
+        self.download_url = os.getenv('TDX_DOWNLOAD_URL', '')
 
     @property
     def database_url(self) -> str:

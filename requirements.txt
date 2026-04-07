@@ -5,3 +5,4 @@ tqdm>=4.67.1
 python-dotenv>=1.1.0
 pymysql>=1.1.1
 psycopg2-binary>=2.9.10
+requests>=2.32.0

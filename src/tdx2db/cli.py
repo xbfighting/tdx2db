@@ -11,6 +11,7 @@ from .processor import DataProcessor
 from .storage import DataStorage
 from .config import config
 from .logger import logger
+from .downloader import download_and_extract, DEFAULT_DOWNLOAD_URL
 
 
 def _has_ex_rights_after(code: str, gbbq: pd.DataFrame, last_date: int) -> bool:
@@ -129,6 +130,13 @@ def parse_args() -> Namespace:
     sync = subparsers.add_parser('sync', help='一键增量同步日线数据')
     sync.add_argument('--adj', choices=['forward', 'backward', 'none'], default='forward')
 
+    # download
+    download = subparsers.add_parser('download', help='联网下载 TDX 日线数据并导入数据库')
+    download.add_argument('--url', help=f'下载地址（默认: {DEFAULT_DOWNLOAD_URL}）')
+    download.add_argument('--adj', choices=['forward', 'backward', 'none'], default='forward')
+    download.add_argument('--no-clean', action='store_true', dest='no_clean',
+                          help='保留临时目录（用于调试）')
+
     return parser.parse_args()
 
 
@@ -157,14 +165,35 @@ def main() -> int:
     args = parse_args()
     update_config(args)
 
+    storage = DataStorage()
+    processor = DataProcessor()
+
+    if args.command == 'download':
+        adj_type = getattr(args, 'adj', 'forward')
+        keep_tmp = getattr(args, 'no_clean', False)
+        url = getattr(args, 'url', None)
+
+        gbbq = pd.DataFrame()
+        if config.tdx_path:
+            try:
+                local_reader = TdxDataReader()
+                gbbq = local_reader.read_gbbq()
+                logger.info("已从本地通达信读取权息文件")
+            except Exception:
+                logger.warning("本地权息文件读取失败，将跳过复权处理")
+
+        logger.info("=== 开始联网下载 TDX 日线数据 ===")
+        with download_and_extract(url=url, keep_tmp=keep_tmp) as vipdoc_path:
+            dl_reader = TdxDataReader(vipdoc_path=str(vipdoc_path))
+            sync_all_daily(dl_reader, processor, storage, gbbq,
+                           adj_type=adj_type, incremental=True)
+        return 0
+
     try:
         reader = TdxDataReader()
     except (ValueError, FileNotFoundError) as e:
         logger.error(f"初始化失败: {e}")
         return 1
-
-    storage = DataStorage()
-    processor = DataProcessor()
 
     if args.command == 'stock-list':
         try:

@@ -11,17 +11,27 @@ from .logger import logger
 
 
 class TdxDataReader:
-    def __init__(self, tdx_path: Optional[str] = None) -> None:
-        self.tdx_path = Path(tdx_path or config.tdx_path)
-        if not self.tdx_path:
-            raise ValueError("通达信数据路径未设置，请在 .env 中设置 TDX_PATH")
-        if not self.tdx_path.exists():
-            raise FileNotFoundError(f"通达信数据路径不存在: {self.tdx_path}")
+    def __init__(self, tdx_path: Optional[str] = None, vipdoc_path: Optional[str] = None) -> None:
+        if vipdoc_path:
+            self.tdx_path = None
+            self._vipdoc_path = Path(vipdoc_path)
+            if not self._vipdoc_path.exists():
+                raise FileNotFoundError(f"vipdoc 目录不存在: {self._vipdoc_path}")
+        else:
+            self.tdx_path = Path(tdx_path or config.tdx_path)
+            if not self.tdx_path:
+                raise ValueError("通达信数据路径未设置，请在 .env 中设置 TDX_PATH")
+            if not self.tdx_path.exists():
+                raise FileNotFoundError(f"通达信数据路径不存在: {self.tdx_path}")
+            self._vipdoc_path = self.tdx_path / 'vipdoc'
         self.daily_reader = TdxDailyBarReader()
         self.gbbq_reader = GbbqReader()
 
     def read_gbbq(self) -> pd.DataFrame:
         """读取权息文件，返回全量权息 DataFrame。文件不存在时返回空 DataFrame。"""
+        if self.tdx_path is None:
+            logger.warning("联网下载模式下不支持读取 gbbq，将跳过复权处理")
+            return pd.DataFrame()
         gbbq_path = self.tdx_path / 'T0002' / 'hq_cache' / 'gbbq'
         if not gbbq_path.exists():
             logger.warning(f"权息文件不存在: {gbbq_path}，将跳过复权处理")
@@ -39,9 +49,9 @@ class TdxDataReader:
 
     def get_stock_list(self) -> pd.DataFrame:
         """扫描本地 .day 文件获取 A 股股票列表（含市场前缀代码）。"""
-        sz_path = self.tdx_path / 'vipdoc' / 'sz' / 'lday'
-        sh_path = self.tdx_path / 'vipdoc' / 'sh' / 'lday'
-        bj_path = self.tdx_path / 'vipdoc' / 'bj' / 'lday'
+        sz_path = self._vipdoc_path / 'sz' / 'lday'
+        sh_path = self._vipdoc_path / 'sh' / 'lday'
+        bj_path = self._vipdoc_path / 'bj' / 'lday'
         if not (sz_path.exists() or sh_path.exists() or bj_path.exists()):
             raise FileNotFoundError("无法找到股票数据目录")
 
@@ -76,13 +86,16 @@ class TdxDataReader:
         market_map = {0: 'sz', 1: 'sh', 2: 'bj'}
         market_folder = market_map[market]
         pure_code = code[-6:] if len(code) > 6 else code
-        file_path = self.tdx_path / 'vipdoc' / market_folder / 'lday' / f"{market_folder}{pure_code}.day"
+        file_path = self._vipdoc_path / market_folder / 'lday' / f"{market_folder}{pure_code}.day"
 
         if not file_path.exists():
             raise FileNotFoundError(f"日线数据文件不存在: {file_path}")
 
+        import io
+        from contextlib import redirect_stdout
         try:
-            sec_type = self.daily_reader.get_security_type(str(file_path))
+            with redirect_stdout(io.StringIO()):
+                sec_type = self.daily_reader.get_security_type(str(file_path))
             if sec_type in self.daily_reader.SECURITY_TYPE:
                 data = self.daily_reader.get_df(str(file_path))
             else:
