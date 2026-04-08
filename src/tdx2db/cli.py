@@ -33,6 +33,35 @@ def _has_ex_rights_after(code: str, gbbq: pd.DataFrame, last_date: int) -> bool:
     return not events.empty
 
 
+def sync_stock_list(reader: TdxDataReader, storage: DataStorage) -> bool:
+    """同步股票列表及名称，返回是否成功。"""
+    try:
+        import akshare as ak
+
+        ak_df = ak.stock_info_a_code_name()
+
+        def _add_suffix(code: str) -> str:
+            if code.startswith('6'):
+                return code + '.SH'
+            elif code.startswith('8') or code.startswith('92'):
+                return code + '.BJ'
+            return code + '.SZ'
+
+        ak_map = {_add_suffix(row['code']): row['name'] for _, row in ak_df.iterrows()}
+
+        local_codes = reader.get_stock_list()
+        df = pd.DataFrame([
+            {'stock_code': c, 'stock_name': ak_map.get(c, c)}
+            for c in local_codes
+        ])
+        logger.info(f"获取到 {len(df)} 只股票")
+        storage.save_stock_info(df)
+        return True
+    except Exception as e:
+        logger.error(f"同步股票列表出错: {e}")
+        return False
+
+
 def sync_all_daily(
     reader: TdxDataReader,
     processor: DataProcessor,
@@ -197,29 +226,7 @@ def main() -> int:
         return 1
 
     if args.command == 'stock-list':
-        try:
-            import akshare as ak
-
-            ak_df = ak.stock_info_a_code_name()  # columns: code, name（code 为纯6位）
-
-            def _add_suffix(code: str) -> str:
-                if code.startswith('6'):
-                    return code + '.SH'
-                elif code.startswith('8') or code.startswith('92'):
-                    return code + '.BJ'
-                return code + '.SZ'
-
-            ak_map = {_add_suffix(row['code']): row['name'] for _, row in ak_df.iterrows()}
-
-            local_codes = reader.get_stock_list()
-            df = pd.DataFrame([
-                {'stock_code': c, 'stock_name': ak_map.get(c, c)}
-                for c in local_codes
-            ])
-            logger.info(f"获取到 {len(df)} 只股票")
-            storage.save_stock_info(df)
-        except Exception as e:
-            logger.error(f"同步股票列表出错: {e}")
+        if not sync_stock_list(reader, storage):
             return 1
 
     elif args.command == 'daily':
@@ -257,6 +264,7 @@ def main() -> int:
     elif args.command == 'sync':
         adj_type = getattr(args, 'adj', 'forward')
         logger.info("=== 开始增量同步日线数据 ===")
+        sync_stock_list(reader, storage)
         gbbq = reader.read_gbbq()
         stats = sync_all_daily(reader, processor, storage, gbbq,
                        adj_type=adj_type, incremental=True)
