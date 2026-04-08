@@ -59,7 +59,7 @@ class TdxDataReader:
         if sz_path.exists():
             for f in sz_path.glob('*.day'):
                 pure = f.stem[-6:].zfill(6)
-                if re.match(r'^(000|001|002|300)\d{3}$', pure):
+                if re.match(r'^(000|001|002|300|301)\d{3}$', pure):
                     codes.append(pure + '.SZ')
 
         if sh_path.exists():
