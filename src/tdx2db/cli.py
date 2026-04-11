@@ -141,6 +141,12 @@ def parse_args() -> Namespace:
     parser.add_argument('--db-password')
     parser.add_argument('--no-tqdm', action='store_true')
     parser.add_argument('--batch-size', type=int, default=10000)
+    parser.add_argument('--smb-host', help='SMB 服务器地址')
+    parser.add_argument('--smb-share', help='SMB 共享名')
+    parser.add_argument('--smb-user', help='SMB 用户名')
+    parser.add_argument('--smb-password', help='SMB 密码')
+    parser.add_argument('--smb-tdx-path', help='TDX 在共享目录内的相对路径', default='')
+    parser.add_argument('--smb-port', type=int, default=445)
 
     subparsers = parser.add_subparsers(dest='command')
 
@@ -188,6 +194,38 @@ def update_config(args: Namespace) -> None:
         config.db_batch_size = args.batch_size
     if args.no_tqdm:
         config.use_tqdm = False
+    if getattr(args, 'smb_host', None):
+        config.smb_host = args.smb_host
+        config.smb_enabled = True
+    if getattr(args, 'smb_share', None):
+        config.smb_share = args.smb_share
+    if getattr(args, 'smb_user', None):
+        config.smb_user = args.smb_user
+    if getattr(args, 'smb_password', None):
+        config.smb_password = args.smb_password
+    if getattr(args, 'smb_tdx_path', None) is not None:
+        config.smb_tdx_path = args.smb_tdx_path
+    if getattr(args, 'smb_port', None):
+        config.smb_port = args.smb_port
+
+
+def _create_reader():
+    """根据配置创建 TdxDataReader，返回 (reader, smb_accessor_or_None)。"""
+    if config.smb_enabled:
+        if not config.smb_host or not config.smb_share:
+            raise ValueError("SMB 模式需要设置 SMB_HOST 和 SMB_SHARE")
+        from .smb_accessor import SmbAccessor
+        smb = SmbAccessor(
+            host=config.smb_host,
+            share=config.smb_share,
+            tdx_path=config.smb_tdx_path,
+            username=config.smb_user or None,
+            password=config.smb_password or None,
+            port=config.smb_port,
+        )
+        smb._register()
+        return TdxDataReader(smb=smb), smb
+    return TdxDataReader(), None
 
 
 def main() -> int:
@@ -203,7 +241,16 @@ def main() -> int:
         url = getattr(args, 'url', None)
 
         gbbq = pd.DataFrame()
-        if config.tdx_path:
+        if config.smb_enabled:
+            try:
+                smb_reader, smb_acc = _create_reader()
+                gbbq = smb_reader.read_gbbq()
+                if smb_acc:
+                    smb_acc._unregister()
+                logger.info("已从 SMB 读取权息文件")
+            except Exception:
+                logger.warning("SMB 权息文件读取失败，将跳过复权处理")
+        elif config.tdx_path:
             try:
                 local_reader = TdxDataReader()
                 gbbq = local_reader.read_gbbq()
@@ -220,59 +267,64 @@ def main() -> int:
         return 0
 
     try:
-        reader = TdxDataReader()
+        reader, smb_accessor = _create_reader()
     except (ValueError, FileNotFoundError) as e:
         logger.error(f"初始化失败: {e}")
         return 1
 
-    if args.command == 'stock-list':
-        if not sync_stock_list(reader, storage):
-            return 1
-
-    elif args.command == 'daily':
-        adj_type = getattr(args, 'adj', 'forward')
-        gbbq = reader.read_gbbq()
-
-        if args.code:
-            pure_code = args.code[-6:] if len(args.code) > 6 else args.code
-            if pure_code.startswith('6'):
-                market = 1
-            elif pure_code.startswith('8') or pure_code.startswith('92'):
-                market = 2
-            else:
-                market = 0
-            prefix = {0: 'sz', 1: 'sh', 2: 'bj'}[market]
-            code = prefix + pure_code
-            try:
-                data = reader.read_daily_data(market, code)
-                if isinstance(data.index, pd.DatetimeIndex) or data.index.name in ('date', 'datetime'):
-                    data = data.reset_index()
-                processed = processor.process_daily_data(data, gbbq=gbbq, adj_type=adj_type)
-                processed = processor.filter_data(processed, start_date=args.start, end_date=args.end)
-                if not processed.empty:
-                    storage.save_incremental(processed, 'daily_data', conflict_columns=('stock_code', 'date'))
-            except Exception as e:
-                logger.error(f"同步 {code} 出错: {e}")
+    try:
+        if args.command == 'stock-list':
+            if not sync_stock_list(reader, storage):
                 return 1
-        else:
-            incremental = getattr(args, 'incremental', False)
+
+        elif args.command == 'daily':
+            adj_type = getattr(args, 'adj', 'forward')
+            gbbq = reader.read_gbbq()
+
+            if args.code:
+                pure_code = args.code[-6:] if len(args.code) > 6 else args.code
+                if pure_code.startswith('6'):
+                    market = 1
+                elif pure_code.startswith('8') or pure_code.startswith('92'):
+                    market = 2
+                else:
+                    market = 0
+                prefix = {0: 'sz', 1: 'sh', 2: 'bj'}[market]
+                code = prefix + pure_code
+                try:
+                    data = reader.read_daily_data(market, code)
+                    if isinstance(data.index, pd.DatetimeIndex) or data.index.name in ('date', 'datetime'):
+                        data = data.reset_index()
+                    processed = processor.process_daily_data(data, gbbq=gbbq, adj_type=adj_type)
+                    processed = processor.filter_data(processed, start_date=args.start, end_date=args.end)
+                    if not processed.empty:
+                        storage.save_incremental(processed, 'daily_data', conflict_columns=('stock_code', 'date'))
+                except Exception as e:
+                    logger.error(f"同步 {code} 出错: {e}")
+                    return 1
+            else:
+                incremental = getattr(args, 'incremental', False)
+                stats = sync_all_daily(reader, processor, storage, gbbq,
+                               adj_type=adj_type, incremental=incremental,
+                               start_date=args.start, end_date=args.end)
+                storage.save_sync_statistics(stats['success'])
+
+        elif args.command == 'sync':
+            adj_type = getattr(args, 'adj', 'forward')
+            logger.info("=== 开始增量同步日线数据 ===")
+            sync_stock_list(reader, storage)
+            gbbq = reader.read_gbbq()
             stats = sync_all_daily(reader, processor, storage, gbbq,
-                           adj_type=adj_type, incremental=incremental,
-                           start_date=args.start, end_date=args.end)
+                           adj_type=adj_type, incremental=True)
             storage.save_sync_statistics(stats['success'])
 
-    elif args.command == 'sync':
-        adj_type = getattr(args, 'adj', 'forward')
-        logger.info("=== 开始增量同步日线数据 ===")
-        sync_stock_list(reader, storage)
-        gbbq = reader.read_gbbq()
-        stats = sync_all_daily(reader, processor, storage, gbbq,
-                       adj_type=adj_type, incremental=True)
-        storage.save_sync_statistics(stats['success'])
+        else:
+            logger.error("请指定子命令，使用 -h 查看帮助")
+            return 1
 
-    else:
-        logger.error("请指定子命令，使用 -h 查看帮助")
-        return 1
+    finally:
+        if smb_accessor is not None:
+            smb_accessor._unregister()
 
     return 0
 

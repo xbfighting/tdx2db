@@ -35,6 +35,46 @@ DB_BATCH_SIZE=10000
 USE_TQDM=True
 ```
 
+## SMB 网络访问模式
+
+如果通达信安装在另一台 Windows PC 上，可以通过 SMB 协议远程读取数据，无需把软件安装在运行本程序的机器上。
+
+### 1. 在 Windows PC 上共享 TDX 目录
+
+右键 TDX 安装目录（如 `D:\new_tdx64`）→ 属性 → 共享 → 高级共享：
+
+- 勾选"共享此文件夹"
+- 设置共享名，如 `new_tdx64`
+- 权限 → 添加需要访问的账户，授予"读取"权限
+
+### 2. 创建专用本地账户（推荐）
+
+**强烈建议**新建一个 Windows 本地账户用于 SMB 访问，而不是使用微软账户。微软账户通过 NTLM 网络认证时兼容性较差，容易登录失败。
+
+在 Windows PC 上以管理员身份打开 PowerShell：
+
+```powershell
+# 创建本地账户（替换为你想要的用户名和密码）
+net user tdxread YourPassword123 /add
+net localgroup Users tdxread /add
+```
+
+然后在共享权限中把 `tdxread` 加入，授予读取权限。
+
+### 3. 配置 .env
+
+```
+SMB_ENABLED=true
+SMB_HOST=192.168.1.100      # Windows PC 的 IP 或主机名
+SMB_SHARE=new_tdx64         # 共享名
+SMB_USER=tdxread            # 本地账户用户名
+SMB_PASSWORD=YourPassword123
+SMB_TDX_PATH=               # TDX 在共享内的相对路径，共享根目录就是 TDX 目录时留空
+SMB_PORT=445
+```
+
+启用 SMB 模式后，`TDX_PATH` 可以不填。
+
 ## 命令行使用
 
 ```bash
