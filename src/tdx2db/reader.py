@@ -141,6 +141,8 @@ class TdxDataReader:
 
         data['code'] = pure_code
         data['market'] = market
+        data['volume'] = data['volume'] * 100   # 手 → 股
+        data['amount'] = data['amount'] / 10000  # 元 → 万元
         return data
 
     @staticmethod

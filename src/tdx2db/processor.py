@@ -197,7 +197,7 @@ class DataProcessor:
 
     @staticmethod
     def _calc_turnover_rate(df: pd.DataFrame, gbbq: pd.DataFrame, float_cap_map: dict = None) -> pd.Series:
-        """计算换手率(%)：volume(手) × 10000 / 流通股本(股)。
+        """计算换手率(%)：volume(股) × 100 / 流通股本(股)。
 
         优先使用 float_cap_map（base.dbf 锚点 + gbbq 逆向推算）；
         float_cap_map 为 None 时降级到原有 gbbq category==5 逻辑。
@@ -222,7 +222,7 @@ class DataProcessor:
                 )
                 cap = merged['float_cap'] * 10000  # 万股 → 股
                 merged['turnover_rate'] = (
-                    (merged['volume'] * 10000 / cap).where(cap > 0).round(4)
+                    (merged['volume'] * 100 / cap).where(cap > 0).round(4)
                 )
                 # 调试：打印最近几条
                 sample = merged[['date_int', 'volume', 'float_cap', 'turnover_rate']].tail(3)
@@ -256,8 +256,8 @@ class DataProcessor:
         )
         # 流通股本单位为万股，× 10000 换算为股
         cap = merged['hongli_panqianliutong'] * 10000
-        # 换手率(%) = volume(手) × 100 / 流通股本(股) × 100 = volume × 10000 / 流通股本(股)
-        merged['turnover_rate'] = (merged['volume'] * 10000 / cap).where(cap > 0).round(4)
+        # 换手率(%) = volume(股) × 100 / 流通股本(股)
+        merged['turnover_rate'] = (merged['volume'] * 100 / cap).where(cap > 0).round(4)
         return merged.set_index('index')['turnover_rate'].reindex(df.index)
 
     @staticmethod
