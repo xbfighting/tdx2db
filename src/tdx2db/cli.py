@@ -72,58 +72,96 @@ def sync_all_daily(
     start_date: Optional[int] = None,
     end_date: Optional[int] = None,
 ) -> dict:
-    """逐股票流式同步日线数据，返回统计信息。"""
+    """逐股票流式同步日线数据，返回统计信息。SMB 模式下使用批量并发下载。"""
     stocks = reader.get_stock_list()
     logger.info(f"共 {len(stocks)} 只股票")
 
     latest_dates = storage.get_all_latest_dates() if incremental else {}
     stats = {'total': len(stocks), 'success': 0, 'failed': 0}
 
-    iterator = tqdm(stocks, total=len(stocks), desc="同步日线") if config.use_tqdm else stocks
-
-    for db_code in iterator:
-        pure_code, suffix = db_code.split('.')
-        market = {'SZ': 0, 'SH': 1, 'BJ': 2}[suffix]
-        code = suffix.lower() + pure_code  # sz000001，供 read_daily_data 使用
+    def _process_one(db_code: str, data: pd.DataFrame) -> None:
+        """处理单只股票的数据并写库。"""
+        pure_code = db_code.split('.')[0]
         last_date = latest_dates.get(db_code)
 
-        try:
-            data = reader.read_daily_data(market, code)
-            if isinstance(data.index, pd.DatetimeIndex) or data.index.name in ('date', 'datetime'):
-                data = data.reset_index()
-            if data.empty:
-                stats['success'] += 1
-                continue
-
-            needs_refresh = (
-                incremental and last_date is not None and
-                _has_ex_rights_after(pure_code, gbbq, last_date)
-            )
-
-            processed = processor.process_daily_data(data, gbbq=gbbq, adj_type=adj_type)
-
-            if incremental and last_date and not needs_refresh:
-                processed = processed[processed['date'] > last_date]
-            if start_date:
-                processed = processed[processed['date'] >= str(start_date)]
-            if end_date:
-                processed = processed[processed['date'] <= str(end_date)]
-
-            if processed.empty:
-                stats['success'] += 1
-                continue
-
-            if needs_refresh:
-                storage.delete_stock_data(db_code)
-            storage.save_incremental(processed, 'daily_data', conflict_columns=('stock_code', 'date'),
-                                     batch_size=config.db_batch_size)
+        if isinstance(data.index, pd.DatetimeIndex) or data.index.name in ('date', 'datetime'):
+            data = data.reset_index()
+        if data.empty:
             stats['success'] += 1
+            return
 
-        except FileNotFoundError:
-            stats['failed'] += 1
-        except Exception as e:
-            logger.error(f"处理 {code} 时出错: {e}")
-            stats['failed'] += 1
+        needs_refresh = (
+            incremental and last_date is not None and
+            _has_ex_rights_after(pure_code, gbbq, last_date)
+        )
+
+        processed = processor.process_daily_data(data, gbbq=gbbq, adj_type=adj_type)
+
+        if incremental and last_date and not needs_refresh:
+            processed = processed[processed['date'] > last_date]
+        if start_date:
+            processed = processed[processed['date'] >= str(start_date)]
+        if end_date:
+            processed = processed[processed['date'] <= str(end_date)]
+
+        if processed.empty:
+            stats['success'] += 1
+            return
+
+        if needs_refresh:
+            storage.delete_stock_data(db_code)
+        storage.save_incremental(processed, 'daily_data', conflict_columns=('stock_code', 'date'),
+                                 batch_size=config.db_batch_size)
+        stats['success'] += 1
+
+    if reader._smb is not None:
+        # SMB 批量并发模式：分批预下载，再串行解析入库
+        stocks_meta = []
+        for db_code in stocks:
+            pure_code, suffix = db_code.split('.')
+            market = {'SZ': 0, 'SH': 1, 'BJ': 2}[suffix]
+            code = suffix.lower() + pure_code
+            stocks_meta.append((market, code, db_code))
+
+        batch_iter = reader.read_daily_data_batch(
+            stocks_meta,
+            batch_size=config.smb_batch_size,
+            smb_workers=config.smb_workers,
+        )
+        iterator = (
+            tqdm(batch_iter, total=len(stocks), desc="同步日线(SMB批量)")
+            if config.use_tqdm else batch_iter
+        )
+
+        for db_code, result in iterator:
+            if isinstance(result, FileNotFoundError):
+                stats['failed'] += 1
+            elif isinstance(result, Exception):
+                logger.error(f"处理 {db_code} 时出错: {result}")
+                stats['failed'] += 1
+            else:
+                try:
+                    _process_one(db_code, result)
+                except Exception as e:
+                    logger.error(f"处理 {db_code} 时出错: {e}")
+                    stats['failed'] += 1
+    else:
+        # 本地串行模式（不变）
+        iterator = tqdm(stocks, total=len(stocks), desc="同步日线") if config.use_tqdm else stocks
+
+        for db_code in iterator:
+            pure_code, suffix = db_code.split('.')
+            market = {'SZ': 0, 'SH': 1, 'BJ': 2}[suffix]
+            code = suffix.lower() + pure_code  # sz000001，供 read_daily_data 使用
+
+            try:
+                data = reader.read_daily_data(market, code)
+                _process_one(db_code, data)
+            except FileNotFoundError:
+                stats['failed'] += 1
+            except Exception as e:
+                logger.error(f"处理 {code} 时出错: {e}")
+                stats['failed'] += 1
 
     logger.info(f"同步完成: 成功 {stats['success']}，失败 {stats['failed']}")
     return stats

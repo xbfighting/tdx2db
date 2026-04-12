@@ -23,6 +23,8 @@ class Config:
     smb_password: str
     smb_tdx_path: str
     smb_port: int
+    smb_workers: int
+    smb_batch_size: int
 
     def __init__(self) -> None:
         self.tdx_path = os.getenv('TDX_PATH', '')
@@ -43,6 +45,8 @@ class Config:
         self.smb_password = os.getenv('SMB_PASSWORD', '')
         self.smb_tdx_path = os.getenv('SMB_TDX_PATH', '')
         self.smb_port = int(os.getenv('SMB_PORT', '445'))
+        self.smb_workers = int(os.getenv('SMB_WORKERS', '16'))
+        self.smb_batch_size = int(os.getenv('SMB_BATCH_SIZE', '200'))
 
     @property
     def database_url(self) -> str:

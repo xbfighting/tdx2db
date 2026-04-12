@@ -1,10 +1,12 @@
 import io
 import os
 import re
+import shutil
 import struct
+import tempfile
 from contextlib import redirect_stdout
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import Iterator, List, Optional, Tuple, TYPE_CHECKING
 
 import pandas as pd
 from pytdx.reader import TdxDailyBarReader, GbbqReader
@@ -189,14 +191,74 @@ class TdxDataReader:
     def _read_daily_via_smb(self, unc: str) -> pd.DataFrame:
         tmp_path = self._smb.download_to_tmp(unc, suffix='.day')
         try:
-            try:
-                with redirect_stdout(io.StringIO()):
-                    sec_type = self.daily_reader.get_security_type(tmp_path)
-                if sec_type in self.daily_reader.SECURITY_TYPE:
-                    return self.daily_reader.get_df(tmp_path)
-                else:
-                    return self._read_day_file_raw(tmp_path)
-            except Exception:
-                return self._read_day_file_raw(tmp_path)
+            return self._parse_local_day_file(tmp_path)
         finally:
             os.unlink(tmp_path)
+
+    def _parse_local_day_file(self, path: str) -> pd.DataFrame:
+        """解析本地 .day 文件（pytdx 优先，不支持的类型降级到原始二进制解析）。"""
+        try:
+            with redirect_stdout(io.StringIO()):
+                sec_type = self.daily_reader.get_security_type(path)
+            if sec_type in self.daily_reader.SECURITY_TYPE:
+                return self.daily_reader.get_df(path)
+            else:
+                return self._read_day_file_raw(path)
+        except Exception:
+            return self._read_day_file_raw(path)
+
+    def read_daily_data_batch(
+        self,
+        stocks_meta: List[Tuple[int, str, str]],
+        batch_size: int = 200,
+        smb_workers: int = 16,
+    ) -> Iterator[Tuple[str, 'pd.DataFrame | Exception']]:
+        """批量并发读取日线数据（仅 SMB 模式）。
+
+        Parameters
+        ----------
+        stocks_meta:
+            List of (market, code, db_code)，与 read_daily_data() 参数对应。
+            - market: 0=深圳 1=上海 2=北京
+            - code:   带市场前缀的代码，如 sz000001
+            - db_code: 数据库代码，如 000001.SZ
+
+        Yields
+        ------
+        (db_code, DataFrame) 或 (db_code, Exception)
+        """
+        if self._smb is None:
+            raise RuntimeError("read_daily_data_batch 仅支持 SMB 模式")
+
+        market_map = {0: 'sz', 1: 'sh', 2: 'bj'}
+
+        for batch_start in range(0, len(stocks_meta), batch_size):
+            batch = stocks_meta[batch_start:batch_start + batch_size]
+
+            # 构建 unc_path → (market, pure_code, db_code) 映射
+            unc_map: dict = {}
+            for market, code, db_code in batch:
+                folder = market_map[market]
+                pure_code = code[-6:]
+                filename = f"{folder}{pure_code}.day"
+                unc = self._smb.day_file_unc(folder, filename)
+                unc_map[unc] = (market, pure_code, db_code)
+
+            tmp_dir = tempfile.mkdtemp(prefix='tdx2db_batch_')
+            try:
+                local_map = self._smb.download_batch_to_dir(
+                    list(unc_map.keys()), tmp_dir, max_workers=smb_workers
+                )
+                for unc, (market, pure_code, db_code) in unc_map.items():
+                    if unc not in local_map:
+                        yield db_code, FileNotFoundError(f"SMB 下载失败: {unc}")
+                        continue
+                    try:
+                        data = self._parse_local_day_file(local_map[unc])
+                        data['code'] = pure_code
+                        data['market'] = market
+                        yield db_code, data
+                    except Exception as e:
+                        yield db_code, e
+            finally:
+                shutil.rmtree(tmp_dir, ignore_errors=True)

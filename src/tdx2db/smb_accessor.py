@@ -4,7 +4,7 @@
 """
 import os
 import tempfile
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import smbclient
 import smbclient.path
@@ -132,3 +132,36 @@ class SmbAccessor:
             tmp.close()
             os.unlink(tmp.name)
             raise
+
+    def download_batch_to_dir(
+        self,
+        unc_paths: List[str],
+        dest_dir: str,
+        max_workers: int = 16,
+    ) -> Dict[str, str]:
+        """并发下载多个 UNC 文件到 dest_dir 目录，返回 {unc_path: local_path}。
+
+        下载失败的文件不出现在返回字典中（异常已记录到日志）。
+        """
+        import concurrent.futures
+        import hashlib
+
+        def _download_one(unc: str):
+            name = hashlib.md5(unc.encode()).hexdigest() + '.day'
+            local = os.path.join(dest_dir, name)
+            data = self.read_bytes(unc)
+            with open(local, 'wb') as f:
+                f.write(data)
+            return unc, local
+
+        result: Dict[str, str] = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(_download_one, unc): unc for unc in unc_paths}
+            for fut in concurrent.futures.as_completed(futures):
+                unc = futures[fut]
+                try:
+                    _, local = fut.result()
+                    result[unc] = local
+                except Exception as e:
+                    logger.warning(f"SMB 批量下载失败 {unc}: {e}")
+        return result
