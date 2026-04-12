@@ -305,6 +305,8 @@ class TdxDataReader:
                         data = self._parse_local_day_file(local_map[unc])
                         data['code'] = pure_code
                         data['market'] = market
+                        data['volume'] = data['volume'] * 100   # 手 → 股
+                        data['amount'] = data['amount'] / 10000  # 元 → 万元
                         yield db_code, data
                     except Exception as e:
                         yield db_code, e
