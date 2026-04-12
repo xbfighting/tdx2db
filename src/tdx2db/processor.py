@@ -135,6 +135,40 @@ class DataProcessor:
         return df
 
     @staticmethod
+    def _calc_turnover_rate(df: pd.DataFrame, gbbq: pd.DataFrame) -> pd.Series:
+        """计算换手率(%)：volume(手) × 100 / 流通股本(股) × 100 = volume × 10000 / 流通股本(股)。
+
+        流通股本来自 gbbq category==5 记录的 hongli_panqianliutong 字段（单位：万股）。
+        datetime 字段为 YYYYMMDD 整数，使用 merge_asof 取每个交易日最近一次股本记录。
+        """
+        market_val = df['market'].iloc[0]
+        prefix = {0: 'sz', 1: 'sh', 2: 'bj'}.get(market_val, 'sz')
+        full_code = prefix + str(df['code'].iloc[0]).zfill(6)
+
+        shares = gbbq[(gbbq['full_code'] == full_code) & (gbbq['category'] == 5)].copy()
+        if shares.empty:
+            return pd.Series([None] * len(df), index=df.index, dtype=float)
+
+        # datetime 直接是 YYYYMMDD 整数
+        shares = shares.rename(columns={'datetime': 'date_int'})
+        shares = shares.sort_values('date_int').drop_duplicates('date_int', keep='last')
+
+        daily = df[['date', 'volume']].copy()
+        daily['date_int'] = daily['date'].astype(int)
+        daily = daily.sort_values('date_int').reset_index(drop=False)
+
+        merged = pd.merge_asof(
+            daily[['index', 'date_int', 'volume']],
+            shares[['date_int', 'hongli_panqianliutong']],
+            on='date_int'
+        )
+        # 流通股本单位为万股，× 10000 换算为股
+        cap = merged['hongli_panqianliutong'] * 10000
+        # 换手率(%) = volume(手) × 100 / 流通股本(股) × 100 = volume × 10000 / 流通股本(股)
+        merged['turnover_rate'] = (merged['volume'] * 10000 / cap).where(cap > 0).round(4)
+        return merged.set_index('index')['turnover_rate'].reindex(df.index)
+
+    @staticmethod
     def process_daily_data(
         df: pd.DataFrame,
         gbbq: pd.DataFrame = None,
@@ -180,8 +214,10 @@ class DataProcessor:
         # 日期转 YYYYMMDD 字符串
         processed['date'] = processed['date'].dt.strftime('%Y%m%d')
 
-        # 预留 turnover_rate 列
-        if 'turnover_rate' not in processed.columns:
+        # 计算换手率
+        if gbbq is not None and not gbbq.empty and 'code' in processed.columns:
+            processed['turnover_rate'] = DataProcessor._calc_turnover_rate(processed, gbbq)
+        else:
             processed['turnover_rate'] = None
 
         # 生成带市场后缀的 stock_code，如 000001.SZ / 600000.SH / 920001.BJ

@@ -97,6 +97,7 @@ class SmbAccessor:
 
     def exists(self, unc_path: str) -> bool:
         try:
+            self._register()
             return smbclient.path.exists(unc_path)
         except Exception:
             return False
