@@ -172,6 +172,9 @@ class TestReaderSmbMode:
         smb.day_file_unc = MagicMock(
             side_effect=lambda m, f: rf'\\host\share\TDX\vipdoc\{m}\lday\{f}'
         )
+        smb.tnf_unc = MagicMock(
+            side_effect=lambda m: rf'\\host\share\TDX\T0002\hq_cache\{m}.tnf'
+        )
         smb.exists = MagicMock(return_value=True)
         smb.list_files = MagicMock(return_value=[])
         if day_bytes is not None:
@@ -280,6 +283,85 @@ class TestReaderSmbMode:
 
         assert len(created_tmp) == 1
         assert not os.path.exists(created_tmp[0]), "临时文件应已被删除"
+
+    def test_read_stock_names_smb(self):
+        """SMB 模式下 read_stock_names 应下载三个 .tnf 并返回名称字典。"""
+        import struct
+
+        def _make_tnf_bytes(code: str, name: str) -> bytes:
+            """构造最小合法 .tnf 文件：50字节头 + 1条314字节记录。"""
+            header = b'\x00' * 50
+            record = bytearray(314)
+            record[0:6] = code.encode('ascii').ljust(6, b'\x00')
+            name_gbk = name.encode('gbk')
+            record[23:23 + len(name_gbk)] = name_gbk
+            return header + bytes(record)
+
+        smb = self._make_smb()
+        # 三个市场各有一只股票
+        tnf_data = {
+            r'\\host\share\TDX\T0002\hq_cache\szs.tnf': _make_tnf_bytes('000001', '平安银行'),
+            r'\\host\share\TDX\T0002\hq_cache\shs.tnf': _make_tnf_bytes('600000', '浦发银行'),
+            r'\\host\share\TDX\T0002\hq_cache\bjs.tnf': _make_tnf_bytes('920001', '北交所A'),
+        }
+
+        def _download_side_effect(unc, suffix='.day'):
+            data = tnf_data.get(unc, b'\x00' * 50)  # 未知文件给空头部
+            tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+            tmp.write(data)
+            tmp.flush()
+            tmp.close()
+            return tmp.name
+
+        smb.download_to_tmp = MagicMock(side_effect=_download_side_effect)
+
+        reader = TdxDataReader(smb=smb)
+        names = reader.read_stock_names()
+
+        # 返回格式为 {'SZ': {...}, 'SH': {...}, 'BJ': {...}}，按市场分组
+        assert names['SZ'].get('000001') == '平安银行'
+        assert names['SH'].get('600000') == '浦发银行'
+        assert names['BJ'].get('920001') == '北交所A'
+        # tnf_unc 应被调用三次
+        assert smb.tnf_unc.call_count == 3
+
+    def test_read_stock_names_smb_download_failure(self):
+        """SMB 模式下某个 .tnf 下载失败时，其他文件仍正常解析。"""
+        import struct
+
+        def _make_tnf_bytes(code: str, name: str) -> bytes:
+            header = b'\x00' * 50
+            record = bytearray(314)
+            record[0:6] = code.encode('ascii').ljust(6, b'\x00')
+            name_gbk = name.encode('gbk')
+            record[23:23 + len(name_gbk)] = name_gbk
+            return header + bytes(record)
+
+        smb = self._make_smb()
+        tnf_data = {
+            r'\\host\share\TDX\T0002\hq_cache\szs.tnf': _make_tnf_bytes('000001', '平安银行'),
+            r'\\host\share\TDX\T0002\hq_cache\bjs.tnf': _make_tnf_bytes('920001', '北交所A'),
+        }
+
+        def _download_side_effect(unc, suffix='.day'):
+            if 'shs' in unc:
+                raise OSError("SMB 连接超时")  # 模拟 shs.tnf 下载失败
+            data = tnf_data.get(unc, b'\x00' * 50)
+            tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+            tmp.write(data)
+            tmp.flush()
+            tmp.close()
+            return tmp.name
+
+        smb.download_to_tmp = MagicMock(side_effect=_download_side_effect)
+
+        reader = TdxDataReader(smb=smb)
+        names = reader.read_stock_names()
+
+        # szs 和 bjs 应正常解析，shs 失败但不影响整体
+        assert names['SZ'].get('000001') == '平安银行'
+        assert names['BJ'].get('920001') == '北交所A'
+        assert '600000' not in names['SH']
 
 
 # ─── TestCliSmbInit ──────────────────────────────────────────────────────────

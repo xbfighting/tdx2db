@@ -97,6 +97,10 @@ class SmbAccessor:
     def day_file_unc(self, market: str, filename: str) -> str:
         return self._unc('vipdoc', market, 'lday', filename)
 
+    def tnf_unc(self, market: str) -> str:
+        """返回 .tnf 股票名称文件的 UNC 路径。market: 'szs' / 'shs' / 'bjs'"""
+        return self._unc('T0002', 'hq_cache', f'{market}.tnf')
+
     # ── 核心 I/O 操作 ─────────────────────────────────────────────────────────
 
     def exists(self, unc_path: str) -> bool:

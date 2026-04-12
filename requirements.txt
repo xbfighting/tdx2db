@@ -6,6 +6,5 @@ python-dotenv>=1.1.0
 pymysql>=1.1.1
 psycopg2-binary>=2.9.10
 requests>=2.32.0
-akshare
 smbprotocol>=1.13.0
 dbfread>=2.0.7

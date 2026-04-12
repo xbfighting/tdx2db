@@ -67,6 +67,29 @@ class TdxDataReader:
             logger.warning(f"读取权息文件时出错: {e}，将跳过复权处理")
             return pd.DataFrame()
 
+    def read_stock_names(self) -> dict:
+        """读取 szs/shs/bjs.tnf，返回按市场分组的名称字典。
+        返回格式：{'SZ': {6位code: 名}, 'SH': {6位code: 名}, 'BJ': {6位code: 名}}
+        三个市场代码空间有重叠（如 000001 在 SZ 是平安银行，在 SH 是上证指数），
+        必须分开存储，不能合并为单一字典。
+        本地模式读 T0002/hq_cache/*.tnf；SMB 模式下载后解析。
+        文件不存在时对应市场返回空字典。
+        """
+        if self._smb is not None:
+            return self._read_stock_names_smb()
+        if self.tdx_path is None:
+            logger.warning("联网下载模式下不支持读取股票名称，将以代码代替名称")
+            return {'SZ': {}, 'SH': {}, 'BJ': {}}
+        result = {}
+        for fname, suffix in (('szs.tnf', 'SZ'), ('shs.tnf', 'SH'), ('bjs.tnf', 'BJ')):
+            path = self.tdx_path / 'T0002' / 'hq_cache' / fname
+            if path.exists():
+                result[suffix] = self._parse_tnf_file(str(path))
+            else:
+                logger.warning(f"股票名称文件不存在: {path}")
+                result[suffix] = {}
+        return result
+
     def read_base_dbf(self) -> dict:
         """读取 base.dbf，返回 {code_6位: 流通股本万股} 字典。文件不存在时返回空字典。"""
         if self._smb is not None:
@@ -167,6 +190,107 @@ class TdxDataReader:
     # ── SMB 私有方法 ──────────────────────────────────────────────────────────
 
     @staticmethod
+    def _detect_tnf_record_len(data: bytes, header_offset: int = 50) -> int:
+        """通过搜索相邻股票代码，自动探测 .tnf 文件的记录长度。
+
+        策略一（精确）：搜索已知相邻代码对，两者位置之差即 record_len。
+        策略二（通用）：扫描所有"偏移0处的6位纯数字"，统计最高频间距。
+        两者都失败则返回默认值 314。
+        """
+        import re as _re
+        from collections import Counter as _Counter
+        body = data[header_offset:]
+
+        # 策略一：已知相邻代码对（覆盖三个市场）
+        pairs = [
+            (b'000001', b'000002'),
+            (b'000002', b'000003'),
+            (b'000004', b'000005'),
+            (b'600000', b'600001'),
+            (b'600001', b'600002'),
+        ]
+        for a, b in pairs:
+            pos_a = body.find(a)
+            if pos_a < 0:
+                continue
+            pos_b = body.find(b, pos_a + 1)
+            if pos_b < 0:
+                continue
+            gap = pos_b - pos_a
+            if 100 < gap < 65536:
+                return gap
+
+        # 策略二：扫描前 200KB，找所有"位置对齐"的6位纯数字，统计间距众数
+        scan = body[:200 * 1024]
+        positions = []
+        for m in _re.finditer(rb'\d{6}', scan):
+            positions.append(m.start())
+        gap_counter = _Counter()
+        for i in range(len(positions) - 1):
+            gap = positions[i + 1] - positions[i]
+            if 100 < gap < 65536:
+                gap_counter[gap] += 1
+        if gap_counter:
+            return gap_counter.most_common(1)[0][0]
+
+        return 314
+
+    @staticmethod
+    def _detect_tnf_name_offset(data: bytes, header_offset: int, record_len: int) -> int:
+        """在已知 record_len 的前提下，探测中文名称字段的字节偏移。
+        策略：取前若干条记录，在 record 内寻找最长的连续非零字节串（即名称字段）。
+        返回探测到的偏移，失败则返回默认值 23。
+        """
+        body = data[header_offset:]
+        # 取前 10 条记录，统计各偏移处出现非零字节的频率
+        sample_count = min(10, len(body) // record_len)
+        if sample_count == 0:
+            return 23
+        # 对每条记录，找 offset 6 之后第一个非零字节簇的起始位置
+        offsets = []
+        for i in range(sample_count):
+            rec = body[i * record_len: (i + 1) * record_len]
+            # 跳过前 6 字节（代码），找后续第一个非零字节
+            j = 6
+            while j < len(rec) and rec[j] == 0:
+                j += 1
+            if j < len(rec):
+                offsets.append(j)
+        if offsets:
+            from collections import Counter
+            return Counter(offsets).most_common(1)[0][0]
+        return 23
+
+    @staticmethod
+    def _parse_tnf_file(file_path: str) -> dict:
+        """解析 TDX .tnf 文件，返回 {6位code: 名称} 字典。
+        自动探测 record_len 和名称字段偏移，兼容新旧版本通达信。
+        非股票记录（代码含非数字字符）自动跳过。
+        """
+        result = {}
+        header_offset = 50
+        with open(file_path, 'rb') as f:
+            data = f.read()
+
+        record_len = TdxDataReader._detect_tnf_record_len(data, header_offset)
+        name_offset = TdxDataReader._detect_tnf_name_offset(data, header_offset, record_len)
+        logger.debug(f"[tnf] {file_path}: record_len={record_len}, name_offset={name_offset}")
+
+        body = data[header_offset:]
+        for i in range(len(body) // record_len):
+            rec = body[i * record_len: (i + 1) * record_len]
+            try:
+                code = rec[0:6].decode('ascii').strip('\x00').strip()
+                if not code or not code.isdigit():
+                    continue
+                name_bytes = rec[name_offset: name_offset + 32].split(b'\x00')[0]
+                name = name_bytes.decode('gbk', errors='replace').strip()
+                result[code] = name
+            except Exception:
+                continue
+        return result
+
+    @staticmethod
     def _parse_base_dbf(path: str) -> dict:
         try:
             from dbfread import DBF
@@ -182,6 +306,29 @@ class TdxDataReader:
                 except (TypeError, ValueError):
                     pass
         logger.info(f"base.dbf 读取完成，共 {len(result)} 条记录")
+        return result
+
+    def _read_stock_names_smb(self) -> dict:
+        """SMB 模式：下载三个 .tnf 文件到临时文件后解析。
+        返回格式：{'SZ': {...}, 'SH': {...}, 'BJ': {...}}
+        直接尝试下载（不做 exists() 预判），避免权限等原因导致误判而静默跳过。
+        """
+        result = {'SZ': {}, 'SH': {}, 'BJ': {}}
+        for market, suffix in (('szs', 'SZ'), ('shs', 'SH'), ('bjs', 'BJ')):
+            unc = self._smb.tnf_unc(market)
+            try:
+                tmp_path = self._smb.download_to_tmp(unc, suffix='.tnf')
+            except Exception as e:
+                logger.warning(f"SMB 下载 {market}.tnf 失败: {e}")
+                continue
+            try:
+                parsed = self._parse_tnf_file(tmp_path)
+                logger.debug(f"{market}.tnf 解析完成: {len(parsed)} 条")
+                result[suffix] = parsed
+            except Exception as e:
+                logger.warning(f"SMB 解析 {market}.tnf 出错: {e}")
+            finally:
+                os.unlink(tmp_path)
         return result
 
     def _read_base_dbf_smb(self) -> dict:

@@ -34,24 +34,19 @@ def _has_ex_rights_after(code: str, gbbq: pd.DataFrame, last_date: int) -> bool:
 
 
 def sync_stock_list(reader: TdxDataReader, storage: DataStorage) -> bool:
-    """同步股票列表及名称，返回是否成功。"""
+    """同步股票列表及名称，返回是否成功。从本地 TDX .tnf 文件读取中文名，无需联网。"""
     try:
-        import akshare as ak
-
-        ak_df = ak.stock_info_a_code_name()
-
-        def _add_suffix(code: str) -> str:
-            if code.startswith('6'):
-                return code + '.SH'
-            elif code.startswith('8') or code.startswith('92'):
-                return code + '.BJ'
-            return code + '.SZ'
-
-        ak_map = {_add_suffix(row['code']): row['name'] for _, row in ak_df.iterrows()}
-
-        local_codes = reader.get_stock_list()
+        # name_map: {'SZ': {6位code: 名}, 'SH': {...}, 'BJ': {...}}
+        # 三个市场代码空间有重叠，必须按市场分开查找
+        name_map = reader.read_stock_names()
+        local_codes = reader.get_stock_list()  # ['000001.SZ', ...]
         df = pd.DataFrame([
-            {'stock_code': c, 'stock_name': ak_map.get(c, c)}
+            {
+                'stock_code': c,
+                'stock_name': name_map.get(c.split('.')[1], {}).get(
+                    c.split('.')[0], c.split('.')[0]
+                )
+            }
             for c in local_codes
         ])
         logger.info(f"获取到 {len(df)} 只股票")
