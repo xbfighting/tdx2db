@@ -107,8 +107,9 @@ class TestSmbAccessorIO:
         acc._register()
         assert mock_reg.call_count == 1
 
+    @patch('smbclient.register_session')
     @patch('smbclient.path.exists', return_value=True)
-    def test_exists_returns_true(self, _):
+    def test_exists_returns_true(self, _mock_exists, _mock_reg):
         acc = SmbAccessor('host', 'share')
         assert acc.exists(r'\\host\share\file') is True
 

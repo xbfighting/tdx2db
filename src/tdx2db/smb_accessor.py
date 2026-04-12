@@ -87,6 +87,10 @@ class SmbAccessor:
     def gbbq_unc(self) -> str:
         return self._unc('T0002', 'hq_cache', 'gbbq')
 
+    @property
+    def base_dbf_unc(self) -> str:
+        return self._unc('T0002', 'hq_cache', 'base.dbf')
+
     def lday_dir_unc(self, market: str) -> str:
         return self._unc('vipdoc', market, 'lday')
 
@@ -114,7 +118,7 @@ class SmbAccessor:
             return []
 
     def read_bytes(self, unc_path: str) -> bytes:
-        with smbclient.open_file(unc_path, mode='rb') as f:
+        with smbclient.open_file(unc_path, mode='rb', share_access='rw') as f:
             return f.read()
 
     def download_to_tmp(self, unc_path: str, suffix: str = '.day') -> str:

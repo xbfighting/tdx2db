@@ -270,10 +270,10 @@ class TestReaderVipdocPath:
         reader = TdxDataReader(vipdoc_path=str(vipdoc))
         stocks = reader.get_stock_list()
 
-        codes = set(stocks['code'].tolist())
-        assert 'sz000001' in codes
-        assert 'sz000002' in codes
-        assert 'sh600000' in codes
+        codes = set(stocks)
+        assert '000001.SZ' in codes
+        assert '000002.SZ' in codes
+        assert '600000.SH' in codes
 
     def test_vipdoc_path_read_daily_data(self, tmp_path):
         """vipdoc_path 模式下 read_daily_data 应返回正确的 DataFrame。"""

@@ -67,6 +67,19 @@ class TdxDataReader:
             logger.warning(f"读取权息文件时出错: {e}，将跳过复权处理")
             return pd.DataFrame()
 
+    def read_base_dbf(self) -> dict:
+        """读取 base.dbf，返回 {code_6位: 流通股本万股} 字典。文件不存在时返回空字典。"""
+        if self._smb is not None:
+            return self._read_base_dbf_smb()
+        if self.tdx_path is None:
+            logger.warning("联网下载模式下不支持读取 base.dbf")
+            return {}
+        dbf_path = self.tdx_path / 'T0002' / 'hq_cache' / 'base.dbf'
+        if not dbf_path.exists():
+            logger.warning(f"base.dbf 不存在: {dbf_path}")
+            return {}
+        return self._parse_base_dbf(str(dbf_path))
+
     def get_stock_list(self) -> list:
         """扫描本地 .day 文件，返回有数据的股票代码列表（000001.SZ 格式）。"""
         if self._smb is not None:
@@ -150,6 +163,39 @@ class TdxDataReader:
         return df[['open', 'high', 'low', 'close', 'amount', 'volume']]
 
     # ── SMB 私有方法 ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _parse_base_dbf(path: str) -> dict:
+        try:
+            from dbfread import DBF
+        except ImportError:
+            raise ImportError("缺少 dbfread 库，请执行: pip install dbfread")
+        result = {}
+        for record in DBF(path, encoding='gbk', load=True):
+            code = str(record.get('GPDM', '') or '').strip().zfill(6)
+            ltag = record.get('LTAG')
+            if code and ltag is not None:
+                try:
+                    result[code] = float(ltag)
+                except (TypeError, ValueError):
+                    pass
+        logger.info(f"base.dbf 读取完成，共 {len(result)} 条记录")
+        return result
+
+    def _read_base_dbf_smb(self) -> dict:
+        unc = self._smb.base_dbf_unc
+        if not self._smb.exists(unc):
+            raise FileNotFoundError(f"SMB base.dbf 不存在: {unc}")
+        try:
+            tmp_path = self._smb.download_to_tmp(unc, suffix='.dbf')
+        except Exception as e:
+            raise RuntimeError(
+                f"base.dbf 无法读取（可能被 TDX 锁定，请关闭 TDX 后重试）: {e}"
+            ) from e
+        try:
+            return self._parse_base_dbf(tmp_path)
+        finally:
+            os.unlink(tmp_path)
 
     def _read_gbbq_smb(self) -> pd.DataFrame:
         unc = self._smb.gbbq_unc

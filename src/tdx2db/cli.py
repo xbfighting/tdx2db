@@ -71,6 +71,7 @@ def sync_all_daily(
     incremental: bool = True,
     start_date: Optional[int] = None,
     end_date: Optional[int] = None,
+    float_cap_map: dict = None,
 ) -> dict:
     """逐股票流式同步日线数据，返回统计信息。SMB 模式下使用批量并发下载。"""
     stocks = reader.get_stock_list()
@@ -95,7 +96,7 @@ def sync_all_daily(
             _has_ex_rights_after(pure_code, gbbq, last_date)
         )
 
-        processed = processor.process_daily_data(data, gbbq=gbbq, adj_type=adj_type)
+        processed = processor.process_daily_data(data, gbbq=gbbq, adj_type=adj_type, float_cap_map=float_cap_map)
 
         if incremental and last_date and not needs_refresh:
             processed = processed[processed['date'] > last_date]
@@ -318,6 +319,8 @@ def main() -> int:
         elif args.command == 'daily':
             adj_type = getattr(args, 'adj', 'forward')
             gbbq = reader.read_gbbq()
+            base_caps = reader.read_base_dbf()
+            float_cap_map = DataProcessor.build_float_capital_map(base_caps, gbbq) if base_caps else {}
 
             if args.code:
                 pure_code = args.code[-6:] if len(args.code) > 6 else args.code
@@ -333,7 +336,7 @@ def main() -> int:
                     data = reader.read_daily_data(market, code)
                     if isinstance(data.index, pd.DatetimeIndex) or data.index.name in ('date', 'datetime'):
                         data = data.reset_index()
-                    processed = processor.process_daily_data(data, gbbq=gbbq, adj_type=adj_type)
+                    processed = processor.process_daily_data(data, gbbq=gbbq, adj_type=adj_type, float_cap_map=float_cap_map)
                     processed = processor.filter_data(processed, start_date=args.start, end_date=args.end)
                     if not processed.empty:
                         storage.save_incremental(processed, 'daily_data', conflict_columns=('stock_code', 'date'))
@@ -344,7 +347,8 @@ def main() -> int:
                 incremental = getattr(args, 'incremental', False)
                 stats = sync_all_daily(reader, processor, storage, gbbq,
                                adj_type=adj_type, incremental=incremental,
-                               start_date=args.start, end_date=args.end)
+                               start_date=args.start, end_date=args.end,
+                               float_cap_map=float_cap_map)
                 storage.save_sync_statistics(stats['success'])
 
         elif args.command == 'sync':
@@ -352,8 +356,15 @@ def main() -> int:
             logger.info("=== 开始增量同步日线数据 ===")
             sync_stock_list(reader, storage)
             gbbq = reader.read_gbbq()
+
+            base_caps = reader.read_base_dbf()
+            float_cap_map = DataProcessor.build_float_capital_map(base_caps, gbbq) if base_caps else {}
+            if not float_cap_map:
+                logger.warning("base.dbf 读取失败，换手率将降级使用 gbbq category==5 逻辑")
+
             stats = sync_all_daily(reader, processor, storage, gbbq,
-                           adj_type=adj_type, incremental=True)
+                           adj_type=adj_type, incremental=True,
+                           float_cap_map=float_cap_map)
             storage.save_sync_statistics(stats['success'])
 
         else:

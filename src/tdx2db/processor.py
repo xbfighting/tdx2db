@@ -135,16 +135,108 @@ class DataProcessor:
         return df
 
     @staticmethod
-    def _calc_turnover_rate(df: pd.DataFrame, gbbq: pd.DataFrame) -> pd.Series:
-        """计算换手率(%)：volume(手) × 100 / 流通股本(股) × 100 = volume × 10000 / 流通股本(股)。
+    def build_float_capital_map(base_caps: dict, gbbq: pd.DataFrame) -> dict:
+        """从 base.dbf 当前流通股本出发，逆向推算历史各时间点的流通股本。
 
-        流通股本来自 gbbq category==5 记录的 hongli_panqianliutong 字段（单位：万股）。
-        datetime 字段为 YYYYMMDD 整数，使用 merge_asof 取每个交易日最近一次股本记录。
+        Returns: {full_code: [(date_int, cap_万股), ...]} 已按 date_int 升序排列，
+        供 merge_asof 使用（date_int 表示"从该日期起生效的流通股本"）。
+        """
+        if gbbq.empty or not base_caps:
+            logger.debug(f"[float_cap] 跳过：gbbq.empty={gbbq.empty} base_caps空={not base_caps}")
+            return {}
+
+        logger.debug(f"[float_cap] base_caps 共 {len(base_caps)} 条，gbbq 共 {len(gbbq)} 行")
+        result = {}
+        relevant_cats = {1, 10, 11, 12, 15}
+        gbbq_filtered = gbbq[gbbq['category'].isin(relevant_cats)].copy()
+        logger.debug(f"[float_cap] gbbq_filtered（cat∈{relevant_cats}）共 {len(gbbq_filtered)} 行，unique full_code={gbbq_filtered['full_code'].nunique()}")
+
+        for full_code, group in gbbq_filtered.groupby('full_code'):
+            pure_code = full_code[2:]  # 去掉 sz/sh/bj 前缀
+            if pure_code not in base_caps:
+                continue
+
+            cap = float(base_caps[pure_code])
+            logger.debug(f"[float_cap] {full_code} base_cap={cap:.2f} 万股，gbbq 事件数={len(group)}")
+            events = group.sort_values('datetime', ascending=False)
+            snapshots = []
+
+            for _, ev in events.iterrows():
+                date_int = int(ev['datetime'])
+                cat = int(ev['category'])
+
+                # 先记录：从 date_int 起生效的股本（事件发生后的值）
+                snapshots.append((date_int, cap))
+
+                # 再逆向推算事件发生前的 cap
+                if cat == 1:
+                    songgu = float(ev.get('songgu_qianzongguben', 0) or 0) / 10.0
+                    peigu  = float(ev.get('peigu_houzongguben', 0) or 0) / 10.0
+                    ratio  = songgu + peigu
+                    if ratio > 0:
+                        cap = cap / (1.0 + ratio)
+                elif cat in (11, 12, 15):
+                    # 增发/解禁/债转股：S_before = S_after - N
+                    value = float(ev.get('hongli_panqianliutong', 0) or 0)
+                    cap = cap - value
+                    if cap <= 0:
+                        cap = float(base_caps[pure_code])  # 异常保护
+                elif cat == 10:
+                    # 回购注销：注销后股本减少，回溯要加回来
+                    value = float(ev.get('hongli_panqianliutong', 0) or 0)
+                    cap = cap + value
+                logger.debug(f"  [{full_code}] cat={cat} date={date_int} → cap_before={cap:.2f} 万股")
+
+            # 兜底：最早历史数据使用推算到底的 cap
+            snapshots.append((0, cap))
+            snapshots.sort(key=lambda x: x[0])
+            result[full_code] = snapshots
+
+        logger.info(f"build_float_capital_map 完成，覆盖 {len(result)} 只股票")
+        return result
+
+    @staticmethod
+    def _calc_turnover_rate(df: pd.DataFrame, gbbq: pd.DataFrame, float_cap_map: dict = None) -> pd.Series:
+        """计算换手率(%)：volume(手) × 10000 / 流通股本(股)。
+
+        优先使用 float_cap_map（base.dbf 锚点 + gbbq 逆向推算）；
+        float_cap_map 为 None 时降级到原有 gbbq category==5 逻辑。
         """
         market_val = df['market'].iloc[0]
         prefix = {0: 'sz', 1: 'sh', 2: 'bj'}.get(market_val, 'sz')
         full_code = prefix + str(df['code'].iloc[0]).zfill(6)
 
+        # ── 优先路径：float_cap_map ──────────────────────────────────────────
+        if float_cap_map is not None and full_code in float_cap_map:
+            snap_list = float_cap_map[full_code]  # [(date_int, cap_万股)]，升序
+            logger.debug(f"[turnover] {full_code} 使用 float_cap_map，快照数={len(snap_list)}")
+            if snap_list:
+                snap_df = pd.DataFrame(snap_list, columns=['date_int', 'float_cap'])
+                daily = df[['date', 'volume']].copy()
+                daily['date_int'] = daily['date'].astype(int)
+                daily = daily.sort_values('date_int').reset_index(drop=False)
+                merged = pd.merge_asof(
+                    daily[['index', 'date_int', 'volume']],
+                    snap_df,
+                    on='date_int'
+                )
+                cap = merged['float_cap'] * 10000  # 万股 → 股
+                merged['turnover_rate'] = (
+                    (merged['volume'] * 10000 / cap).where(cap > 0).round(4)
+                )
+                # 调试：打印最近几条
+                sample = merged[['date_int', 'volume', 'float_cap', 'turnover_rate']].tail(3)
+                for _, row in sample.iterrows():
+                    logger.debug(
+                        f"  [{full_code}] date={int(row['date_int'])} "
+                        f"vol={row['volume']:.0f} cap={row['float_cap']:.2f}万股 "
+                        f"turnover={row['turnover_rate']:.4f}%"
+                    )
+                return merged.set_index('index')['turnover_rate'].reindex(df.index)
+
+        # ── 降级路径：原有 gbbq category==5 逻辑 ────────────────────────────
+        if gbbq.empty or 'full_code' not in gbbq.columns:
+            return pd.Series([None] * len(df), index=df.index, dtype=float)
         shares = gbbq[(gbbq['full_code'] == full_code) & (gbbq['category'] == 5)].copy()
         if shares.empty:
             return pd.Series([None] * len(df), index=df.index, dtype=float)
@@ -172,7 +264,8 @@ class DataProcessor:
     def process_daily_data(
         df: pd.DataFrame,
         gbbq: pd.DataFrame = None,
-        adj_type: str = 'forward'
+        adj_type: str = 'forward',
+        float_cap_map: dict = None,
     ) -> pd.DataFrame:
         """日线处理主流程：reset_index → 填充缺失值 → 校验 → 复权 → 日期转 YYYYMMDD 整数。"""
         if df.empty:
@@ -216,7 +309,9 @@ class DataProcessor:
 
         # 计算换手率
         if gbbq is not None and not gbbq.empty and 'code' in processed.columns:
-            processed['turnover_rate'] = DataProcessor._calc_turnover_rate(processed, gbbq)
+            processed['turnover_rate'] = DataProcessor._calc_turnover_rate(
+                processed, gbbq, float_cap_map=float_cap_map
+            )
         else:
             processed['turnover_rate'] = None
 
