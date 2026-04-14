@@ -2,12 +2,17 @@
 
 从本地通达信（TDX）行情软件读取 A 股日线数据，增量同步到数据库。支持作为 Python 包被其他项目调用。
 
+## 测试环境
+
+- 通达信版本：**金融终端 V7.72（64位）**
+
 ## 特性
 
-- 同步深圳/上海全量 A 股日线数据（含科创板）
+- 同步深圳/上海/北交所全量 A 股日线数据（含科创板）
 - 前复权 / 后复权 / 不复权，默认前复权
 - 增量更新：有除权事件的个股自动全量重写，确保复权价格正确
-- 日期格式：`YYYYMMDD` 整数（便于范围查询）
+- 包含换手率数据（`turnover_rate`）
+- 日期格式：`YYYYMMDD` 字符串（便于范围查询）
 - 数据库：SQLite（默认）/ MySQL / PostgreSQL
 
 ## 安装
@@ -75,6 +80,16 @@ SMB_PORT=445
 
 启用 SMB 模式后，`TDX_PATH` 可以不填。
 
+## 准备工作：下载历史盘后数据
+
+使用本程序前，需要先在通达信中下载历史盘后数据：
+
+1. 打开通达信客户端
+2. 菜单栏 → **选项** → **盘后数据下载**
+3. 选择需要的历史数据范围并下载完成
+
+> 程序读取的是通达信本地 `.day` 文件，必须先确保数据已通过上述方式下载到本地，否则无法同步。
+
 ## 命令行使用
 
 ```bash
@@ -126,20 +141,46 @@ print(df.head())
 
 ## 数据表结构
 
-**daily_data**
+数据库包含以下三张表，由 SQLAlchemy 在首次运行时自动创建，无需手动执行 SQL。
+
+### daily_data（日线数据）
 
 | 列 | 类型 | 说明 |
 |----|------|------|
-| code | String | 股票代码（6位，如 `000001`） |
-| market | Integer | 市场（0=深圳，1=上海） |
-| date | Integer | 日期 YYYYMMDD |
-| open/high/low/close | Float | 复权后价格 |
-| volume | Float | 成交量 |
-| amount | Float | 成交额 |
-| adj_factor | Float | 复权因子（1.0=无复权） |
-| turnover_rate | Float | 换手率（%），待实现 |
+| id | Integer | 自增主键 |
+| stock_code | String(12) | 股票代码（6位，如 `000001`） |
+| market | Integer | 市场（0=深圳，1=上海，2=北京） |
+| date | String(8) | 日期，格式 `YYYYMMDD` |
+| open | Float | 开盘价（复权后） |
+| high | Float | 最高价（复权后） |
+| low | Float | 最低价（复权后） |
+| close | Float | 收盘价（复权后） |
+| volume | Float | 成交量（手） |
+| amount | Float | 成交额（元） |
+| adj_factor | Float | 复权因子（前复权时 < 1，不复权时 = 1.0） |
+| turnover_rate | Float | 换手率（%），无法计算时为 NULL |
 
-唯一约束：`(code, date)`
+唯一约束：`(stock_code, date)`
+
+### stock_info（股票列表）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| stock_code | String(12) | 股票代码（主键，如 `000001`） |
+| stock_name | String(50) | 股票名称（如 `平安银行`） |
+
+唯一约束：`stock_code`（即主键）
+
+### kline_statistics（同步统计）
+
+每次 `sync` 命令完成后写入一条统计记录，用于追踪历次同步情况。
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | Integer | 自增主键 |
+| stock_count | Integer | 本次同步的股票数量 |
+| total_rows | Integer | 同步后 daily_data 的总行数 |
+| sync_time | DateTime | 同步完成时间 |
 
 ## 运行测试
 
