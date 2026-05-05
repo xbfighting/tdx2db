@@ -48,6 +48,7 @@ CLI (cli.py)  → Reader (reader.py) → Processor (processor.py) → Storage (s
 1. **日线**: 逐股票读取 `vipdoc/{sz,sh}/lday/*.day` → `process_daily_data()` 校验 OHLCV + 计算均线 → 增量写入 `daily_data` 表
 2. **分钟线**: 逐股票读取 `.lc5`（5 分钟）→ `resample_ohlcv()` 重采样为 15/30/60 分钟 → `process_min_data()` 校验 + 均线 → 分别写入 `minute{5,15,30,60}_data` 表
 3. **增量同步**: `save_incremental()` 使用批量 executemany + `ON CONFLICT DO NOTHING`（PostgreSQL）/ `INSERT IGNORE`（MySQL）跳过重复。分钟线按股票精确查询最新日期（`get_latest_datetime_by_code`），日线逐股票增量。
+4. **回溯窗口**: 分钟线增量起点 = `latest - LOOKBACK_DAYS`（默认 30 天，cli.py 顶部常量），不是 `latest + 1`。原因：TDX `.lc5` 拉取存在滞后，「latest+1」会把后置日期入库后导致前置空洞被永久跳过；ON CONFLICT 保证重复插入零副作用。修复旧数据用 `scripts/backfill_minute_gaps.py` 全量重读。
 
 ### 数据库表
 

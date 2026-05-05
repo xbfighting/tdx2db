@@ -97,6 +97,21 @@ python main.py minutes --csv-only
 ```
 </details>
 
+<details>
+<summary>修复历史空洞（minute 数据）</summary>
+
+如果发现 minute5/15/30/60 表存在历史日期空洞（例如某些股票在某天缺数据），
+可运行一次性回填脚本，从 TDX `.lc5` 全量重读 + ON CONFLICT 自动只补缺失：
+
+```bash
+python scripts/backfill_minute_gaps.py            # 全市场（约 1-2 小时）
+python scripts/backfill_minute_gaps.py --code sz000001
+python scripts/backfill_minute_gaps.py --dry-run  # 看流程不写库
+```
+
+> 自 2026-05 起，`sync` 默认回溯 30 天写入，新空洞不会再形成；本脚本仅用于修旧数据。
+</details>
+
 ## 数据库支持
 
 - PostgreSQL（推荐）

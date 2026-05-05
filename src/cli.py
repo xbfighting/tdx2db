@@ -19,6 +19,13 @@ from .storage import DataStorage
 from .config import config
 from .logger import logger
 
+# 增量同步回溯窗口（天数）
+# 不用 latest+1 作为起点，而是 latest-N。理由：
+# 1. TDX .lc5 拉取存在滞后（部分股票当日不一定及时更新），后续补上后旧空洞会被永久跳过
+# 2. 数据库 (code, datetime) 唯一约束 + ON CONFLICT DO NOTHING 保证重复插入零副作用
+# 3. .lc5 文件无论如何都会被全文件读取，回溯只多过滤几天数据，IO 不增加
+LOOKBACK_DAYS = 30
+
 
 def sync_single_stock_min_data(
     reader: TdxDataReader,
@@ -43,12 +50,12 @@ def sync_single_stock_min_data(
     # DB 中 code 为纯 6 位数字（reader 写入时会截取），查询时需匹配
     db_code = code[-6:] if len(code) > 6 else code
 
-    # 精确增量：查询该股票的最新日期
+    # 精确增量：查询该股票的最新日期，回溯 LOOKBACK_DAYS 天作为起点
     if incremental and not start_date:
         latest = storage.get_latest_datetime_by_code('minute5_data', db_code)
         if latest:
-            start_date = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
-            logger.debug(f"{code} 增量起始日期: {start_date}")
+            start_date = (latest - timedelta(days=LOOKBACK_DAYS)).strftime('%Y-%m-%d')
+            logger.debug(f"{code} 增量起始日期: {start_date} (latest={latest.date()}, lookback={LOOKBACK_DAYS}d)")
 
     # 读取5分钟数据
     df_5min = reader.read_5min_data(market, code)
