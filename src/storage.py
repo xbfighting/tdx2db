@@ -260,21 +260,25 @@ class DataStorage:
     def get_latest_datetime_by_code(
         self,
         table_name: str,
-        code: str
+        code: str,
+        date_column: str = 'datetime'
     ) -> Optional[dt]:
         """获取指定股票的最新 datetime
 
         Args:
             table_name: 表名
             code: 股票代码
+            date_column: 日期列名（分钟表 datetime，日线表 date）
 
         Returns:
             Optional[datetime]: 最新的 datetime，如果没有数据则返回 None
         """
+        if date_column not in ('datetime', 'date'):
+            raise ValueError(f"非法日期列名: {date_column}")
         try:
             with self.engine.connect() as conn:
                 result = conn.execute(
-                    text(f"SELECT MAX(datetime) FROM {table_name} WHERE code = :code"),
+                    text(f"SELECT MAX({date_column}) FROM {table_name} WHERE code = :code"),
                     {"code": code}
                 )
                 row = result.fetchone()

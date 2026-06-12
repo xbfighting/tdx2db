@@ -103,7 +103,11 @@ def sync_all_daily_data(
     storage: DataStorage,
     start_date: Optional[str] = None,
 ) -> bool:
-    """逐股票流式同步日线数据，避免全量加载到内存"""
+    """逐股票流式同步日线数据，避免全量加载到内存
+
+    start_date=None 时按股票精确增量（查各自的 MAX(date)）。
+    全表 MAX(date) 做起点会把库里没有的新股全历史过滤掉（2026-06-12 科创/301 首次同步踩坑）。
+    """
     try:
         stocks = reader.get_stock_list()
         logger.info(f"同步日线数据，共 {len(stocks)} 只股票")
@@ -115,6 +119,15 @@ def sync_all_daily_data(
             code = stock['code']
             market = 1 if code.startswith('sh') else 0
             try:
+                # 精确增量：该股票自己的最新日期；新股 latest=None → 全历史
+                stock_start = start_date
+                if stock_start is None:
+                    db_code = code[-6:] if len(code) > 6 else code
+                    latest = storage.get_latest_datetime_by_code(
+                        'daily_data', db_code, date_column='date')
+                    if latest:
+                        stock_start = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
+
                 data = reader.read_daily_data(market, code)
                 if isinstance(data.index, pd.DatetimeIndex) or data.index.name == 'datetime':
                     data = data.reset_index()
@@ -122,7 +135,7 @@ def sync_all_daily_data(
                     continue
 
                 processed = processor.process_daily_data(data)
-                filtered = processor.filter_data(processed, start_date=start_date)
+                filtered = processor.filter_data(processed, start_date=stock_start)
                 if filtered.empty:
                     continue
 
@@ -439,16 +452,11 @@ def main() -> int:
         processor = DataProcessor()
         has_error = False
 
-        # 1. 同步日线数据
+        # 1. 同步日线数据（逐股票精确增量，不传全局 start_date——
+        #    全表 MAX(date) 会把新上市/新纳入股票的全历史过滤掉）
         try:
             logger.info("=== 同步日线数据 ===")
-            latest = storage.get_latest_datetime('daily_data', date_column='date')
-            start_date = None
-            if latest:
-                start_date = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
-                logger.info(f"日线起始日期: {start_date}")
-
-            success = sync_all_daily_data(reader, processor, storage, start_date)
+            success = sync_all_daily_data(reader, processor, storage)
             if not success:
                 logger.error("同步日线数据时出错")
                 has_error = True
