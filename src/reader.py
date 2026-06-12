@@ -67,8 +67,8 @@ class TdxDataReader:
 
                 pure_code = code[-6:]
                 code_str = str(pure_code).zfill(6)  # 补齐为6位字符串
-                # 匹配上证A股+深证A股
-                if re.match(r'^(000|001|002|300)\d{3}$', code_str):
+                # 深证A股：主板 000/001/002 + 创业板 300/301
+                if re.match(r'^(000|001|002|300|301)\d{3}$', code_str):
                     stocks.append({'code': code, 'name': name})
 
         # 处理上海股票
@@ -79,8 +79,8 @@ class TdxDataReader:
 
                 pure_code = code[-6:]
                 code_str = str(pure_code).zfill(6)  # 补齐为6位字符串
-                # 匹配上证A股+深证A股
-                if re.match(r'^(60|688)\d{4}$', code_str):
+                # 上证A股：主板 60xxxx + 科创板 688xxx（旧正则 688\d{4} 共 7 位，永远匹配不上 6 位代码）
+                if re.match(r'^(60\d{4}|688\d{3})$', code_str):
                     stocks.append({'code': code, 'name': name})
 
         if not stocks:
