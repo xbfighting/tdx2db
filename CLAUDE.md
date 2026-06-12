@@ -66,6 +66,8 @@ CLI (cli.py)  → Reader (reader.py) → Processor (processor.py) → Storage (s
 A 股筛选规则：深圳 `000/001/002/300/301` 开头，上海 `60xxxx/688xxx`。
 北证（`vipdoc/bj/`）暂未纳入。历史教训：2026-06 之前上海正则误写为 `688\d{4}`（7 位），科创板被静默排除数年；同期深圳漏 `301`。
 
+**表级差异（跨表查询/监控脚本必看）**：`stock_info.code` 带市场前缀（`sz000001`）；`daily_data` / `minute*_data` 的 code 为 **6 位纯数字**（reader 写入时截取）。已两次踩坑：commit 532ce76（分钟线增量 code 格式不匹配导致全量重处理）、20260612（监控脚本用 `LIKE 'sh688%'` 查 daily_data 静默零匹配）。
+
 ## 配置
 
 通过 `.env` 文件配置，必填：`TDX_PATH`、`DB_TYPE`、`DB_HOST`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`。
