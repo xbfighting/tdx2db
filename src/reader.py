@@ -67,8 +67,8 @@ class TdxDataReader:
 
                 pure_code = code[-6:]
                 code_str = str(pure_code).zfill(6)  # 补齐为6位字符串
-                # 匹配上证A股+深证A股
-                if re.match(r'^(000|001|002|300)\d{3}$', code_str):
+                # 深证A股：主板 000/001/002 + 创业板 300/301
+                if re.match(r'^(000|001|002|300|301)\d{3}$', code_str):
                     stocks.append({'code': code, 'name': name})
 
         # 处理上海股票
@@ -79,8 +79,8 @@ class TdxDataReader:
 
                 pure_code = code[-6:]
                 code_str = str(pure_code).zfill(6)  # 补齐为6位字符串
-                # 匹配上证A股+深证A股
-                if re.match(r'^(60|688)\d{4}$', code_str):
+                # 上证A股：主板 60xxxx + 科创板 688xxx（旧正则 688\d{4} 共 7 位，永远匹配不上 6 位代码）
+                if re.match(r'^(60\d{4}|688\d{3})$', code_str):
                     stocks.append({'code': code, 'name': name})
 
         if not stocks:
@@ -109,11 +109,37 @@ class TdxDataReader:
         if not file_path.exists():
             raise FileNotFoundError(f"日线数据文件不存在: {file_path}")
 
-        # 读取数据
-        data = self.daily_reader.get_df(str(file_path))
+        # pytdx get_security_type 不识别科创板 688（code_head '68' 不在任何分支），
+        # get_df 会 print 噪音 + raise NotImplementedError，需先检查再决定走原始解析
+        sec_type = self.daily_reader.get_security_type(str(file_path))
+        if sec_type in self.daily_reader.SECURITY_TYPE:
+            data = self.daily_reader.get_df(str(file_path))
+        else:
+            data = self._read_day_file_raw(str(file_path))
         data['code'] = code
         data['market'] = market
         return data
+
+    @staticmethod
+    def _read_day_file_raw(fname: str) -> pd.DataFrame:
+        """直接解析 .day 文件，绕过 pytdx 的证券类型检查（用于科创板 688 等）。
+        系数与 pytdx SH_A_STOCK 路径一致：价格 ×0.01，volume ×0.01，amount 原样。"""
+        import struct
+        rows = []
+        with open(fname, 'rb') as f:
+            content = f.read()
+        record_size = struct.calcsize('<IIIIIfII')
+        for i in range(0, len(content) - record_size + 1, record_size):
+            row = struct.unpack_from('<IIIIIfII', content, i)
+            t = str(row[0])
+            date_str = f"{t[:4]}-{t[4:6]}-{t[6:]}"
+            rows.append((date_str,
+                         row[1] * 0.01, row[2] * 0.01, row[3] * 0.01, row[4] * 0.01,
+                         row[5], row[6] * 0.01))
+        df = pd.DataFrame(rows, columns=['date', 'open', 'high', 'low', 'close', 'amount', 'volume'])
+        df.index = pd.to_datetime(df['date'])
+        df.index.name = 'date'
+        return df[['open', 'high', 'low', 'close', 'amount', 'volume']]
 
     def read_min_data(self, market: int, code: str) -> List[pd.DataFrame]:
         """读取5分钟线数据并生成15分钟、30分钟和60分数据
