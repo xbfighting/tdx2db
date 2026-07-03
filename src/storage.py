@@ -300,7 +300,8 @@ class DataStorage:
                     return row[0]
                 return None
         except Exception as e:
-            logger.debug(f"获取表 {table_name} 股票 {code} 最新日期时出错: {e}")
+            # warning 而非 debug：此查询挂掉会静默退化为全量重扫，用户必须可见
+            logger.warning(f"获取表 {table_name} 股票 {code} 最新日期时出错（将全量重扫该股票）: {e}")
             return None
 
     def save_incremental(
@@ -374,7 +375,8 @@ class DataStorage:
                         conn.execute(sql, records)
                         conn.commit()
 
-            logger.info(f"增量保存完成: 共处理 {total_rows} 条到表 {table_name}（重复数据已跳过）")
+            # per-call 日志降为 debug：全量同步时每股 ×4 表的 INFO 会淹没进度条
+            logger.debug(f"增量保存完成: 共处理 {total_rows} 条到表 {table_name}（重复数据已跳过）")
             return total_rows
 
         except Exception as e:

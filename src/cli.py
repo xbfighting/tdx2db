@@ -21,6 +21,16 @@ from .config import config
 from .logger import logger
 
 
+def infer_market(code: str) -> int:
+    """从股票代码推断市场：sh/sz 前缀直接判定；6 位纯数字按首位（6/68 沪，其余深）"""
+    c = code.lower()
+    if c.startswith('sh'):
+        return 1
+    if c.startswith('sz'):
+        return 0
+    return 1 if c.startswith('6') else 0
+
+
 def sync_single_stock_min_data(
     reader: TdxDataReader,
     processor: DataProcessor,
@@ -91,7 +101,7 @@ def sync_single_stock_min_data(
             storage.save_minute_data(processed, freq=freq, to_csv=False, to_db=True)
 
     if has_data:
-        logger.info(f"{code} 分钟数据已处理并存入数据库")
+        logger.debug(f"{code} 分钟数据已处理并存入数据库")
     else:
         logger.debug(f"{code} 无新数据需要同步")
 
@@ -115,6 +125,7 @@ def sync_all_daily_data(
 
         iterator = tqdm(stocks.iterrows(), total=len(stocks)) if config.use_tqdm else stocks.iterrows()
         total_inserted = 0
+        failed = 0
 
         for _, stock in iterator:
             code = stock['code']
@@ -149,13 +160,20 @@ def sync_all_daily_data(
             except FileNotFoundError:
                 continue
             except Exception as e:
+                failed += 1
                 logger.error(f"同步 {code} 日线数据时出错: {e}")
                 continue
 
         if total_inserted > 0:
-            logger.info(f"日线数据同步完成，共插入 {total_inserted} 条")
+            logger.info(f"日线数据同步完成，共处理 {total_inserted} 条（重复已跳过）"
+                        + (f"，{failed} 只股票失败" if failed else ""))
         else:
-            logger.info("日线数据已是最新")
+            logger.info("日线数据已是最新" + (f"（{failed} 只股票失败）" if failed else ""))
+
+        # 失败率超 1% 视为整体失败——cron 用户靠退出码监控
+        if len(stocks) and failed / len(stocks) > 0.01:
+            logger.error(f"日线同步失败率过高: {failed}/{len(stocks)}")
+            return False
         return True
     except Exception as e:
         logger.error(f"同步日线数据时出错: {e}")
@@ -174,18 +192,33 @@ def sync_all_min_data(
         logger.info(f"处理所有股票的分钟数据，共 {len(stocks)} 只股票")
 
         iterator = tqdm(stocks.iterrows(), total=len(stocks)) if config.use_tqdm else stocks.iterrows()
+        synced = 0
+        nodata = 0
+        failed = 0
 
         for _, stock in iterator:
             code = stock['code']
             market = 1 if code.startswith('sh') else 0
             try:
-                sync_single_stock_min_data(reader, processor, storage, market, code, start_date)
+                if sync_single_stock_min_data(reader, processor, storage, market, code, start_date):
+                    synced += 1
+                else:
+                    nodata += 1
             except FileNotFoundError:
+                nodata += 1
                 continue
             except Exception as e:
+                failed += 1
                 logger.error(f"处理 {code} 分钟数据时出错: {e}")
                 continue
 
+        logger.info(f"分钟数据同步完成：{synced} 只已处理，{nodata} 只无数据"
+                    + (f"，{failed} 只失败" if failed else ""))
+
+        # 失败率超 1% 视为整体失败——cron 用户靠退出码监控
+        if len(stocks) and failed / len(stocks) > 0.01:
+            logger.error(f"分钟同步失败率过高: {failed}/{len(stocks)}")
+            return False
         return True
     except Exception as e:
         logger.error(f"处理分钟数据时出错: {e}")
@@ -197,7 +230,18 @@ def parse_args() -> Namespace:
     Returns:
         Namespace: 解析后的命令行参数
     """
-    parser = argparse.ArgumentParser(description='通达信数据处理工具')
+    parser = argparse.ArgumentParser(
+        description='通达信数据处理工具',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            '典型用法:\n'
+            '  python main.py sync                                        # 日常一键增量同步（日线+分钟线）\n'
+            '  python main.py stock-list --db-only                        # 首次使用先同步股票列表\n'
+            '  python main.py daily --db-only --code 600000 --incremental # 单股票补数（market 自动推断）\n'
+            '\n'
+            '注意: --no-tqdm 等全局参数需放在子命令之前，如 python main.py --no-tqdm sync'
+        ),
+    )
 
     # 通用参数
     parser.add_argument('--tdx-path', help='通达信安装目录路径')
@@ -209,7 +253,8 @@ def parse_args() -> Namespace:
     parser.add_argument('--db-user', help='数据库用户名')
     # 不提供 --db-password：argv 中的密码会暴露于进程列表和 shell 历史，密码只从 .env 读取
     parser.add_argument('--no-tqdm', action='store_true', help='禁用进度条')
-    parser.add_argument('--batch-size', type=int, default=10000, help='数据库批量插入的批次大小，默认10000条')
+    # 默认 None：不覆盖 .env 的 DB_BATCH_SIZE（此前默认 10000 恒为真值，.env 配置永远不生效）
+    parser.add_argument('--batch-size', type=int, default=None, help='数据库批量插入的批次大小（默认取 .env 的 DB_BATCH_SIZE，缺省 10000）')
 
     # 子命令
     subparsers = parser.add_subparsers(dest='command', help='子命令')
@@ -222,9 +267,9 @@ def parse_args() -> Namespace:
     # 获取日线数据
     daily_parser = subparsers.add_parser('daily', help='获取日线数据')
     daily_parser.add_argument('--code', help='股票代码，不指定则获取所有股票')
-    daily_parser.add_argument('--market', type=int, choices=[0, 1], help='市场代码，0表示深圳，1表示上海')
-    daily_parser.add_argument('--start_date', help='开始日期，格式为YYYY-MM-DD')
-    daily_parser.add_argument('--end_date', help='结束日期，格式为YYYY-MM-DD')
+    daily_parser.add_argument('--market', type=int, choices=[0, 1], help='市场代码，0深圳 1上海（不指定则从 code 自动推断）')
+    daily_parser.add_argument('--start-date', '--start_date', dest='start_date', help='开始日期，格式为YYYY-MM-DD')
+    daily_parser.add_argument('--end-date', '--end_date', dest='end_date', help='结束日期，格式为YYYY-MM-DD')
     daily_parser.add_argument('--csv-only', action='store_true', help='仅保存到CSV')
     daily_parser.add_argument('--db-only', action='store_true', help='仅保存到数据库')
     daily_parser.add_argument('--auto-start', action='store_true', help='自动检测起始日期（逐股票精确增量，各股票从自己的最新日期+1天开始）')
@@ -233,18 +278,14 @@ def parse_args() -> Namespace:
     # 获取并计算分钟线数据
     min_parser = subparsers.add_parser('minutes', help='获取分钟线数据')
     min_parser.add_argument('--code', help='股票代码，不指定则获取所有股票')
-    min_parser.add_argument('--market', type=int, choices=[0, 1], help='市场代码，0表示深圳，1表示上海')
-    min_parser.add_argument('--start_date', help='开始日期，格式为YYYY-MM-DD')
-    min_parser.add_argument('--end_date', help='结束日期，格式为YYYY-MM-DD')
+    min_parser.add_argument('--market', type=int, choices=[0, 1], help='市场代码，0深圳 1上海（不指定则从 code 自动推断）')
+    min_parser.add_argument('--start-date', '--start_date', dest='start_date', help='开始日期，格式为YYYY-MM-DD')
+    min_parser.add_argument('--end-date', '--end_date', dest='end_date', help='结束日期，格式为YYYY-MM-DD')
     min_parser.add_argument('--csv-only', action='store_true', help='仅保存到CSV')
     min_parser.add_argument('--db-only', action='store_true', help='仅保存到数据库')
     min_parser.add_argument('--auto-start', action='store_true', help='自动检测起始日期（从数据库最新日期+1天开始）')
     min_parser.add_argument('--incremental', action='store_true', help='增量同步模式，跳过重复数据')
 
-    # 获取板块与股票对应关系
-    block_relation_parser = subparsers.add_parser('block-relation', help='获取板块与股票对应关系【未实现】')
-    block_relation_parser.add_argument('--csv-only', action='store_true', help='仅保存到CSV')
-    block_relation_parser.add_argument('--db-only', action='store_true', help='仅保存到数据库')
 
     # 一键同步（日线 + 分钟线增量同步到数据库）
     subparsers.add_parser('sync', help='一键增量同步所有数据到数据库（日线 + 5/15/30/60分钟线）')
@@ -276,7 +317,7 @@ def update_config(args: Namespace) -> None:
         config.db_name = args.db_name
     if args.db_user:
         config.db_user = args.db_user
-    if args.batch_size:
+    if args.batch_size is not None:
         config.db_batch_size = args.batch_size
 
     # 更新进度条配置
@@ -363,9 +404,10 @@ def main() -> int:
                     logger.info(f"数据库中没有 {args.code} 的数据，将获取全部历史")
 
             # 获取日线数据
-            if args.code and args.market is not None:
-                # 获取单只股票的日线数据
-                data = reader.read_daily_data(args.market, args.code)
+            if args.code:
+                # 获取单只股票的日线数据（market 未指定时从 code 推断）
+                market = args.market if args.market is not None else infer_market(args.code)
+                data = reader.read_daily_data(market, args.code)
             else:
                 # 获取所有股票的日线数据
                 data = reader.read_all_daily_data()
@@ -431,18 +473,21 @@ def main() -> int:
             incremental = hasattr(args, 'incremental') and args.incremental
 
             # 获取分钟线数据
-            if args.code and args.market is not None:
+            if args.code:
                 # 单只股票：统一走 sync_single_stock_min_data，覆盖 5/15/30/60 全部周期
+                # market 未指定时从 code 推断（此前漏 --market 会静默进入全市场同步）
+                market = args.market if args.market is not None else infer_market(args.code)
                 processor = DataProcessor()
                 success = sync_single_stock_min_data(
                     reader, processor, storage,
-                    args.market, args.code,
+                    market, args.code,
                     start_date=start_date,
                     incremental=incremental,
                 )
                 if not success:
                     logger.warning(f"股票 {args.code} 无数据可同步")
                     return 0
+                logger.info(f"{args.code} 分钟数据同步完成")
             else:
                 # 获取所有股票的分钟线数据
                 logger.info("开始处理所有股票的分钟线数据...")
@@ -458,25 +503,10 @@ def main() -> int:
             logger.error(f"获取分钟线数据时出错: {e}")
             return 1
 
-    elif args.command == 'block-relation':
-        # 获取板块与股票对应关系
-        try:
-            block_relations = reader.get_block_stock_relation()
-            logger.info(f"获取到 {len(block_relations)} 条板块与股票对应关系记录")
-
-            # 确定保存方式
-            to_csv = not args.db_only
-            to_db = not args.csv_only
-
-            # 保存数据
-            storage.save_block_relation(block_relations, to_csv=to_csv, to_db=to_db, batch_size=config.db_batch_size)
-
-        except Exception as e:
-            logger.error(f"获取板块与股票对应关系时出错: {e}")
-            return 1
-
     elif args.command == 'sync':
         # 一键增量同步所有数据
+        import time
+        t0 = time.monotonic()
         logger.info("开始一键增量同步...")
         processor = DataProcessor()
         has_error = False
@@ -504,11 +534,12 @@ def main() -> int:
             logger.error(f"同步分钟线数据时出错: {e}")
             has_error = True
 
+        elapsed = time.monotonic() - t0
         if has_error:
-            logger.warning("同步完成，但有部分错误")
+            logger.warning(f"同步完成但有错误（耗时 {elapsed/60:.1f} 分钟），请回看上方 ERROR 日志")
             return 1
         else:
-            logger.info("一键增量同步完成！")
+            logger.info(f"一键增量同步完成！耗时 {elapsed/60:.1f} 分钟")
 
     else:
         logger.error("请指定子命令，使用 -h 查看帮助信息")
