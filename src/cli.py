@@ -302,6 +302,9 @@ def main() -> int:
     # 初始化数据存储器
     try:
         storage = DataStorage()
+    except ValueError as e:
+        logger.error(f"数据库配置错误: {e}")
+        return 1
     except OperationalError as e:
         logger.error(f"数据库连接失败: {e.orig if e.orig else e}")
         logger.error(

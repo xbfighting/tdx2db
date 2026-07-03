@@ -50,3 +50,11 @@ def test_unknown_db_type_raises(monkeypatch):
     monkeypatch.setattr(config, 'db_type', 'oracle')
     with pytest.raises(ValueError):
         _ = config.database_url
+
+
+def test_non_numeric_port_raises_clear_error(pg_config, monkeypatch):
+    """DB_PORT 手滑配错时给明确配置错误，而非裸 traceback"""
+    monkeypatch.setattr(config, 'db_password', 'x')
+    monkeypatch.setattr(config, 'db_port', '5432"')
+    with pytest.raises(ValueError, match='DB_PORT'):
+        _ = config.database_url

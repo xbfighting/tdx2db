@@ -67,12 +67,17 @@ class Config:
         else:
             raise ValueError(f"不支持的数据库类型: {self.db_type}")
 
+        try:
+            port = int(self.db_port)
+        except (TypeError, ValueError):
+            raise ValueError(f"DB_PORT 配置无效（应为数字）: {self.db_port!r}，请检查 .env")
+
         return URL.create(
             drivername,
             username=self.db_user,
             password=self.db_password or None,
             host=self.db_host,
-            port=int(self.db_port),
+            port=port,
             database=self.db_name,
         )
 
