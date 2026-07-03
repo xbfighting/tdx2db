@@ -39,7 +39,6 @@ htmlcov/
 .mypy_cache/
 
 # Poetry
-poetry.lock
 
 # output
 output/

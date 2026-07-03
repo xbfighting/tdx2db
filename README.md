@@ -12,8 +12,9 @@ python main.py sync
 ## 安装
 
 ```bash
-# Python >= 3.10
+# Python >= 3.9
 pip install -r requirements.txt
+# 国内网络可选用镜像加速：pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
 
 # 复制并编辑配置文件
 cp .env.example .env
