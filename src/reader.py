@@ -13,7 +13,6 @@ from typing import Optional, List
 
 import pandas as pd
 from pytdx.reader import TdxDailyBarReader, TdxMinBarReader, TdxLCMinBarReader
-from pytdx.reader import BlockReader
 from tqdm import tqdm
 
 from .config import config
@@ -41,7 +40,6 @@ class TdxDataReader:
         self.daily_reader = TdxDailyBarReader()
         self.min_reader = TdxMinBarReader()
         self.lc_min_reader = TdxLCMinBarReader()
-        self.block_reader = BlockReader()
 
     def get_stock_list(self) -> pd.DataFrame:
         """获取股票列表
@@ -160,13 +158,11 @@ class TdxDataReader:
         if not file_path.exists():
             raise FileNotFoundError(f"5分钟线数据文件不存在: {file_path}")
 
-        # 读取5分钟数据
-        logger.info(f"正在读取 {code} 的5分钟线数据...")
-        with tqdm(total=1, desc="读取进度") as pbar:
-            data = self.lc_min_reader.get_df(str(file_path))
-            data['code'] = code
-            data['market'] = market
-            pbar.update(1)
+        # 读取5分钟数据（per-stock 日志降为 debug：全量同步时 5000+ 只的 INFO 会淹没进度条）
+        logger.debug(f"正在读取 {code} 的5分钟线数据...")
+        data = self.lc_min_reader.get_df(str(file_path))
+        data['code'] = code
+        data['market'] = market
 
         # 确保datetime列存在并且是日期时间类型
         if 'datetime' not in data.columns:
@@ -215,13 +211,11 @@ class TdxDataReader:
         if not file_path.exists():
             raise FileNotFoundError(f"5分钟线数据文件不存在: {file_path}")
 
-        # 读取5分钟数据
-        logger.info(f"正在读取 {code} 的5分钟线数据...")
-        with tqdm(total=1, desc="读取进度") as pbar:
-            data = self.lc_min_reader.get_df(str(file_path))
-            data['code'] = code
-            data['market'] = market
-            pbar.update(1)
+        # 读取5分钟数据（per-stock 日志降为 debug，理由同上）
+        logger.debug(f"正在读取 {code} 的5分钟线数据...")
+        data = self.lc_min_reader.get_df(str(file_path))
+        data['code'] = code
+        data['market'] = market
 
         # 确保datetime列存在并且是日期时间类型
         if 'datetime' not in data.columns:
@@ -292,144 +286,3 @@ class TdxDataReader:
 
         return result_df
 
-    # 板块关系暂时未实现，由于板块文件未找到
-    def get_block_stock_relation(self) -> pd.DataFrame:
-        """获取通达信板块与股票的对应关系
-
-        Returns:
-            DataFrame: 包含板块代码、板块名称和对应股票代码的DataFrame
-        """
-        # 板块文件目录
-        block_path = self.tdx_path / 'T0002' / 'hq_cache'
-
-        if not block_path.exists():
-            raise FileNotFoundError(f"板块文件目录不存在: {block_path}")
-
-        blocks = self.block_reader.get_df(self.tdx_path / 'BlockMap' / 'TdxZLSelStock.dat')
-        logger.debug(f"读取到板块数据: {len(blocks)} 条记录")
-
-        # # 板块文件列表
-        # block_files = list(block_path.glob('block*.dat'))
-        # block_files.extend(list(block_path.glob('block*.blk')))
-
-        # if not block_files:
-        #     raise FileNotFoundError(f"未找到板块文件: {block_path}")
-
-        # # 存储板块与股票的对应关系
-        # block_stock_relations = []
-
-        # # 遍历板块文件
-        # for block_file in block_files:
-        #     block_type = block_file.stem
-
-        #     try:
-        #         # 使用BlockReader读取板块文件
-        #         block_data = self.block_reader.get_df(str(block_file))
-
-        #         if block_data.empty:
-        #             continue
-
-        #         # 处理板块数据
-        #         for _, row in block_data.iterrows():
-        #             block_stock_relations.append({
-        #                 'block_code': row.get('block_code', block_type),
-        #                 'block_name': row.get('block_name', block_type),
-        #                 'code': row.get('code', ''),
-        #                 'name': row.get('name', '')
-        #             })
-        #     except Exception as e:
-        #         print(f"读取板块文件{block_file}时出错: {e}")
-
-        #         # 尝试直接读取文件内容
-        #         try:
-        #             with open(block_file, 'rb') as f:
-        #                 content = f.read()
-
-        #             # 解析板块文件内容
-        #             block_name = block_file.stem
-
-        #             # 尝试从文件名或内容中提取板块名称
-        #             if block_file.suffix.lower() == '.dat':
-        #                 # .dat文件通常是二进制格式
-        #                 try:
-        #                     # 尝试从文件头部提取板块名称
-        #                     if len(content) > 50:
-        #                         # 通达信板块文件格式可能不同，这里尝试几种常见格式
-        #                         try:
-        #                             name_bytes = content[0:50].split(b'\x00')[0]
-        #                             block_name = name_bytes.decode('gbk', errors='ignore').strip()
-        #                         except:
-        #                             pass
-        #                 except:
-        #                     pass
-
-        #             # 提取股票代码
-        #             codes = []
-
-        #             # 解析文件内容提取股票代码
-        #             if block_file.suffix.lower() == '.blk':
-        #                 # .blk文件通常是文本格式
-        #                 try:
-        #                     text_content = content.decode('gbk', errors='ignore')
-        #                     for line in text_content.split('\n'):
-        #                         line = line.strip()
-        #                         if line and not line.startswith('#'):
-        #                             # 通常格式为 1 000001 或 0 000001
-        #                             parts = line.split()
-        #                             if len(parts) >= 2:
-        #                                 market = int(parts[0])
-        #                                 code = parts[1]
-        #                                 market_prefix = 'sh' if market == 1 else 'sz'
-        #                                 codes.append(f"{market_prefix}{code}")
-        #                             else:
-        #                                 # 可能只有代码，没有市场标识
-        #                                 code = line
-        #                                 # 根据代码前缀判断市场
-        #                                 if code.startswith(('6', '5', '9')):
-        #                                     codes.append(f"sh{code}")
-        #                                 else:
-        #                                     codes.append(f"sz{code}")
-        #                 except:
-        #                     pass
-        #             elif block_file.suffix.lower() == '.dat':
-        #                 # .dat文件通常是二进制格式
-        #                 try:
-        #                     # 跳过文件头部，直接读取股票代码部分
-        #                     offset = 384  # 通常板块文件头部大小
-        #                     while offset < len(content):
-        #                         if offset + 7 <= len(content):
-        #                             market = content[offset]
-        #                             code = content[offset+1:offset+7].decode('ascii', errors='ignore')
-        #                             if code.isdigit():
-        #                                 market_prefix = 'sh' if market == 1 else 'sz'
-        #                                 codes.append(f"{market_prefix}{code}")
-        #                         offset += 7
-        #                 except:
-        #                     pass
-
-        #             # 添加到结果列表
-        #             for code in codes:
-        #                 block_stock_relations.append({
-        #                     'block_code': block_type,
-        #                     'block_name': block_name,
-        #                     'code': code,
-        #                     'name': ''
-        #                 })
-        #         except Exception as e:
-        #             print(f"直接解析板块文件{block_file}时出错: {e}")
-
-        # # 转换为DataFrame
-        # if not block_stock_relations:
-        #     return pd.DataFrame()
-
-        # df = pd.DataFrame(block_stock_relations)
-
-        # # 尝试补充股票名称
-        # try:
-        #     stocks = self.get_stock_list()
-        #     stock_dict = dict(zip(stocks['code'], stocks['name']))
-        #     df['name'] = df['code'].map(stock_dict)
-        # except Exception as e:
-        #     print(f"补充股票名称时出错: {e}")
-
-        return blocks
