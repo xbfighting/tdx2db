@@ -3,6 +3,7 @@ name = "tdx-data-processor"
 version = "0.1.0"
 description = "一个使用pytdx读取本地股票数据并存储到数据库或CSV的程序"
 authors = ["我如此拉风 <xbfighting@hotmail.com>"]
+license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
