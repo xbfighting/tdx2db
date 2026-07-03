@@ -51,15 +51,30 @@ class Config:
 
     @property
     def database_url(self):
-        """获取数据库连接URL"""
+        """获取数据库连接URL
+
+        用 URL.create 而非 f-string 拼接：密码含 @ : / 等字符时不会解析错乱，
+        且 URL 对象在日志/异常中自动掩码密码。
+        """
+        from sqlalchemy import URL
+
         if self.db_type == 'postgresql':
-            return f"postgresql://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
+            drivername = 'postgresql'
         elif self.db_type == 'mysql':
-            return f"mysql+pymysql://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
+            drivername = 'mysql+pymysql'
         elif self.db_type == 'sqlite':
-            return f"sqlite:///{self.db_name}.db"
+            return URL.create('sqlite', database=f"{self.db_name}.db")
         else:
             raise ValueError(f"不支持的数据库类型: {self.db_type}")
+
+        return URL.create(
+            drivername,
+            username=self.db_user,
+            password=self.db_password or None,
+            host=self.db_host,
+            port=int(self.db_port),
+            database=self.db_name,
+        )
 
 # 创建全局配置实例
 config = Config()

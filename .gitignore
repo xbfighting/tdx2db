@@ -45,3 +45,6 @@ poetry.lock
 output/
 
 */__pycache__/
+
+# 内部复盘笔记（不入公开仓库）
+retrospectives/

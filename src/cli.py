@@ -207,7 +207,7 @@ def parse_args() -> Namespace:
     parser.add_argument('--db-port', help='数据库端口')
     parser.add_argument('--db-name', help='数据库名称')
     parser.add_argument('--db-user', help='数据库用户名')
-    parser.add_argument('--db-password', help='数据库密码')
+    # 不提供 --db-password：argv 中的密码会暴露于进程列表和 shell 历史，密码只从 .env 读取
     parser.add_argument('--no-tqdm', action='store_true', help='禁用进度条')
     parser.add_argument('--batch-size', type=int, default=10000, help='数据库批量插入的批次大小，默认10000条')
 
@@ -276,8 +276,6 @@ def update_config(args: Namespace) -> None:
         config.db_name = args.db_name
     if args.db_user:
         config.db_user = args.db_user
-    if args.db_password:
-        config.db_password = args.db_password
     if args.batch_size:
         config.db_batch_size = args.batch_size
 
