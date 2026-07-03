@@ -328,6 +328,9 @@ def main() -> int:
             # --auto-start 全股票模式：逐股票精确增量（与 sync 命令同路径）。
             # 全表 MAX(date)+1 做起点会在同步中断后把未完成股票的数据静默过滤掉（issue #12）
             if hasattr(args, 'auto_start') and args.auto_start and not start_date and not args.code:
+                if args.csv_only:
+                    logger.error("--auto-start 逐股票增量模式仅写入数据库，与 --csv-only 冲突；如需 CSV 请显式指定 --start_date")
+                    return 1
                 if not args.db_only:
                     logger.warning("--auto-start 逐股票增量模式仅写入数据库，跳过 CSV 输出；如需 CSV 请显式指定 --start_date")
                 if args.end_date:
