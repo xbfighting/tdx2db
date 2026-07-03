@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "tdx2db"
-version = "0.1.0"
+version = "0.2.0"
 description = "读取本地通达信(TDX)股票数据，增量同步到 PostgreSQL/MySQL/SQLite"
 authors = ["我如此拉风 <xbfighting@hotmail.com>"]
 license = "MIT"

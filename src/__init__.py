@@ -1,6 +1,6 @@
 """TDX数据处理器 - 用于读取通达信本地股票数据并存储到数据库或CSV"""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .logger import logger, setup_logger
 
