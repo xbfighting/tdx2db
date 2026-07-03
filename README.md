@@ -17,6 +17,11 @@ pip install -r requirements.txt
 
 # 复制并编辑配置文件
 cp .env.example .env
+
+# 创建数据库（表结构会在首次运行时自动创建，但数据库本身需要先建好）
+createdb tdx_data                          # PostgreSQL
+# mysql -u root -p -e 'CREATE DATABASE tdx_data'   # MySQL
+# SQLite 无需此步骤
 ```
 
 **.env 必填配置**：
@@ -43,19 +48,32 @@ python main.py stock-list --db-only
 python main.py sync
 ```
 
-## 启用增量同步（推荐）
+## 增量同步与唯一约束
 
-> 增量同步可自动跳过重复数据，大幅提升每日更新效率。
+增量同步（自动跳过重复数据）依赖 `(code, date/datetime)` 唯一约束。
 
-**老用户**（已有数据库表）需执行一次约束脚本：
+**新用户**：无需任何操作——表结构由程序自动创建，已内建唯一约束。
+
+**老用户**（v0.2.0 之前建的表没有约束）需执行一次迁移脚本，**否则 PostgreSQL 下增量写入会全部失败、MySQL/SQLite 下会静默累积重复数据**。不确定的话可先自检：
+
+```sql
+-- PostgreSQL：有输出说明约束已存在，无需迁移
+SELECT conname FROM pg_constraint WHERE conname LIKE 'uq_%';
+-- MySQL
+SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME LIKE 'uq_%';
+```
+
+迁移脚本：
 ```bash
 # PostgreSQL
 psql -U your_user -d your_database -f scripts/add_constraints.sql
+
+# MySQL
+mysql -u your_user -p your_database < scripts/add_constraints_mysql.sql
 ```
 
-**新用户**同样建议执行，以启用增量同步功能。
-
-脚本作用：为 `daily_data`、`minute*_data` 表添加唯一约束，确保 `(code, date/datetime)` 不重复。
+脚本会先清理已有重复数据再加约束，执行前请备份。
 
 ## 每日更新
 

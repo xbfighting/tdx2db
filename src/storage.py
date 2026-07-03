@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 import pandas as pd
-from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, MetaData, Table, text
+from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, MetaData, Table, UniqueConstraint, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from tqdm import tqdm
@@ -24,6 +24,9 @@ Base = declarative_base()
 class BlockStockRelation(Base):
     """板块股票关系表模型"""
     __tablename__ = 'block_stock_relation'
+    # 唯一约束是 save_incremental 增量写入（ON CONFLICT / INSERT IGNORE）的前提，
+    # 缺失时 PG 会报错、MySQL/SQLite 会静默重复累积（issue #16）
+    __table_args__ = (UniqueConstraint('block_code', 'code', name='uq_block_code'),)
 
     id = Column(Integer, primary_key=True)
     block_code = Column(String(20), index=True)  # 板块代码
@@ -34,6 +37,7 @@ class BlockStockRelation(Base):
 class DailyData(Base):
     """日线数据表模型"""
     __tablename__ = 'daily_data'
+    __table_args__ = (UniqueConstraint('code', 'date', name='uq_daily_code_date'),)
 
     id = Column(Integer, primary_key=True)
     code = Column(String(10), index=True)
@@ -61,6 +65,7 @@ class DailyData(Base):
 class Minute5Data(Base):
     """5分钟线数据表模型"""
     __tablename__ = 'minute5_data'
+    __table_args__ = (UniqueConstraint('code', 'datetime', name='uq_minute5_code_datetime'),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     code = Column(String(10), nullable=False, index=True)
@@ -88,6 +93,7 @@ class Minute5Data(Base):
 class Minute15Data(Base):
     """15分钟线数据表模型"""
     __tablename__ = 'minute15_data'
+    __table_args__ = (UniqueConstraint('code', 'datetime', name='uq_minute15_code_datetime'),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     code = Column(String(10), nullable=False, index=True)
@@ -115,6 +121,7 @@ class Minute15Data(Base):
 class Minute30Data(Base):
     """30分钟线数据表模型"""
     __tablename__ = 'minute30_data'
+    __table_args__ = (UniqueConstraint('code', 'datetime', name='uq_minute30_code_datetime'),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     code = Column(String(10), nullable=False, index=True)
@@ -143,6 +150,7 @@ class Minute30Data(Base):
 class Minute60Data(Base):
     """60分钟线数据表模型"""
     __tablename__ = 'minute60_data'
+    __table_args__ = (UniqueConstraint('code', 'datetime', name='uq_minute60_code_datetime'),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     code = Column(String(10), nullable=False, index=True)
@@ -347,7 +355,17 @@ class DataStorage:
                 with self.engine.connect() as conn:
                     for i in range(0, total_rows, batch_size):
                         batch_df = df_to_save.iloc[i:i + batch_size]
-                        conn.execute(sql, batch_df.to_dict('records'))
+                        # sqlite3 适配器按精确类型匹配，不识别 pd.Timestamp（虽是
+                        # datetime 子类）；先转 dict 再逐值转换，避开 pandas 类型推断
+                        records = [
+                            {
+                                k: (None if pd.isna(v) else
+                                    v.to_pydatetime() if isinstance(v, pd.Timestamp) else v)
+                                for k, v in rec.items()
+                            }
+                            for rec in batch_df.to_dict('records')
+                        ]
+                        conn.execute(sql, records)
                         conn.commit()
 
             logger.info(f"增量保存完成: 共处理 {total_rows} 条到表 {table_name}（重复数据已跳过）")

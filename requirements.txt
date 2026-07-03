@@ -4,3 +4,4 @@ sqlalchemy>=2.0.40
 tqdm>=4.67.1
 python-dotenv>=1.1.0
 psycopg2-binary>=2.9.10
+pymysql>=1.1.1

@@ -11,6 +11,7 @@ from typing import Optional
 from datetime import timedelta
 
 import pandas as pd
+from sqlalchemy.exc import OperationalError
 from tqdm import tqdm
 
 from .reader import TdxDataReader
@@ -301,7 +302,18 @@ def main() -> int:
         return 1
 
     # 初始化数据存储器
-    storage = DataStorage()
+    try:
+        storage = DataStorage()
+    except OperationalError as e:
+        logger.error(f"数据库连接失败: {e.orig if e.orig else e}")
+        logger.error(
+            "请依次检查：\n"
+            f"  1) 数据库服务是否已启动（{config.db_type} @ {config.db_host}:{config.db_port}）\n"
+            f"  2) 数据库 {config.db_name} 是否已创建（PostgreSQL: createdb {config.db_name}；"
+            f"MySQL: CREATE DATABASE {config.db_name}）\n"
+            "  3) .env 中 DB_USER / DB_PASSWORD 等配置是否正确"
+        )
+        return 1
 
     # 处理子命令
     if args.command == 'stock-list':
