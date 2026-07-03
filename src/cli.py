@@ -226,7 +226,7 @@ def parse_args() -> Namespace:
     daily_parser.add_argument('--end_date', help='结束日期，格式为YYYY-MM-DD')
     daily_parser.add_argument('--csv-only', action='store_true', help='仅保存到CSV')
     daily_parser.add_argument('--db-only', action='store_true', help='仅保存到数据库')
-    daily_parser.add_argument('--auto-start', action='store_true', help='自动检测起始日期（从数据库最新日期+1天开始）')
+    daily_parser.add_argument('--auto-start', action='store_true', help='自动检测起始日期（逐股票精确增量，各股票从自己的最新日期+1天开始）')
     daily_parser.add_argument('--incremental', action='store_true', help='增量同步模式，跳过重复数据')
 
     # 获取并计算分钟线数据
@@ -323,15 +323,28 @@ def main() -> int:
 
     elif args.command == 'daily':
         try:
-            # 处理 --auto-start 参数
             start_date = args.start_date
-            if hasattr(args, 'auto_start') and args.auto_start and not start_date:
-                latest = storage.get_latest_datetime('daily_data', date_column='date')
+
+            # --auto-start 全股票模式：逐股票精确增量（与 sync 命令同路径）。
+            # 全表 MAX(date)+1 做起点会在同步中断后把未完成股票的数据静默过滤掉（issue #12）
+            if hasattr(args, 'auto_start') and args.auto_start and not start_date and not args.code:
+                if not args.db_only:
+                    logger.warning("--auto-start 逐股票增量模式仅写入数据库，跳过 CSV 输出；如需 CSV 请显式指定 --start_date")
+                if args.end_date:
+                    logger.warning(f"--auto-start 逐股票增量模式忽略 --end_date {args.end_date}")
+                processor = DataProcessor()
+                success = sync_all_daily_data(reader, processor, storage)
+                return 0 if success else 1
+
+            # --auto-start 单股票模式：查该股票自己的最新日期，而非全表 MAX
+            if hasattr(args, 'auto_start') and args.auto_start and not start_date and args.code:
+                db_code = args.code[-6:] if len(args.code) > 6 else args.code
+                latest = storage.get_latest_datetime_by_code('daily_data', db_code, date_column='date')
                 if latest:
                     start_date = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
-                    logger.info(f"自动检测起始日期: {start_date}")
+                    logger.info(f"自动检测 {args.code} 起始日期: {start_date}")
                 else:
-                    logger.info("数据库中没有数据，将获取所有数据")
+                    logger.info(f"数据库中没有 {args.code} 的数据，将获取全部历史")
 
             # 获取日线数据
             if args.code and args.market is not None:
