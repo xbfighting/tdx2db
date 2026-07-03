@@ -23,7 +23,7 @@ python main.py minutes --db-only --auto-start --incremental
 python main.py stock-list --db-only
 ```
 
-无测试套件。验证方式是运行 `sync` 命令后检查数据库数据。
+测试：`pytest tests/`（processor 纯函数 + 模块导入冒烟，CI 三矩阵 3.9/3.10/3.11 运行）。数据正确性验证仍以运行 `sync` 后检查数据库为准。
 
 ## 架构
 
