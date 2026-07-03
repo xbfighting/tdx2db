@@ -252,6 +252,10 @@ class DataStorage:
         Returns:
             Optional[datetime]: 最新的日期/时间，如果表为空则返回 None
         """
+        if table_name not in _VALID_TABLES:
+            raise ValueError(f"不允许查询的表名: {table_name}")
+        if date_column not in ('datetime', 'date'):
+            raise ValueError(f"非法日期列名: {date_column}")
         try:
             with self.engine.connect() as conn:
                 result = conn.execute(
@@ -281,6 +285,8 @@ class DataStorage:
         Returns:
             Optional[datetime]: 最新的 datetime，如果没有数据则返回 None
         """
+        if table_name not in _VALID_TABLES:
+            raise ValueError(f"不允许查询的表名: {table_name}")
         if date_column not in ('datetime', 'date'):
             raise ValueError(f"非法日期列名: {date_column}")
         try:
@@ -421,6 +427,9 @@ class DataStorage:
         Returns:
             bool: 是否保存成功
         """
+        if table_name not in _VALID_TABLES:
+            raise ValueError(f"不允许写入的表名: {table_name}")
+
         if df.empty:
             logger.warning(f"没有数据可保存到表 {table_name}")
             return False
