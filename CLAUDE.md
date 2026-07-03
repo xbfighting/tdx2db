@@ -58,7 +58,7 @@ CLI (cli.py)  → Reader (reader.py) → Processor (processor.py) → Storage (s
 | `stock_info` | code | 股票列表 |
 | `block_stock_relation` | — | 板块关系（未完整实现） |
 
-唯一约束需通过 `scripts/add_constraints.sql` 手动添加。
+唯一约束已内建于 `src/storage.py` 的模型定义（`create_all` 自动创建）；仅老库（PR #17 之前建的表）需执行 `scripts/add_constraints.sql` / `add_constraints_mysql.sql` 迁移。
 
 ### 股票代码格式
 

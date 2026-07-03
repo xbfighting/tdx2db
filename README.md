@@ -54,7 +54,17 @@ python main.py sync
 
 **新用户**：无需任何操作——表结构由程序自动创建，已内建唯一约束。
 
-**老用户**（v0.2.0 之前建的表没有约束）需执行一次迁移脚本，**否则 PostgreSQL 下增量写入会全部失败、MySQL/SQLite 下会静默累积重复数据**：
+**老用户**（v0.2.0 之前建的表没有约束）需执行一次迁移脚本，**否则 PostgreSQL 下增量写入会全部失败、MySQL/SQLite 下会静默累积重复数据**。不确定的话可先自检：
+
+```sql
+-- PostgreSQL：有输出说明约束已存在，无需迁移
+SELECT conname FROM pg_constraint WHERE conname LIKE 'uq_%';
+-- MySQL
+SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME LIKE 'uq_%';
+```
+
+迁移脚本：
 ```bash
 # PostgreSQL
 psql -U your_user -d your_database -f scripts/add_constraints.sql
