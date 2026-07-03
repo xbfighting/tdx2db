@@ -432,4 +432,4 @@ class TdxDataReader:
         # except Exception as e:
         #     print(f"补充股票名称时出错: {e}")
 
-        return df
+        return blocks
