@@ -53,6 +53,29 @@ def test_save_incremental_rejects_unknown_table(sqlite_storage):
         sqlite_storage.save_incremental(_daily_df(), 'evil_table', conflict_columns=('code', 'date'))
 
 
+def test_get_table_stats_counts_and_dates(sqlite_storage):
+    """get_table_stats：行数/覆盖股票数/日期范围（issue #28）"""
+    sqlite_storage.save_incremental(_daily_df(), 'daily_data', conflict_columns=('code', 'date'))
+    stats = {s['table']: s for s in sqlite_storage.get_table_stats()}
+
+    daily = stats['daily_data']
+    assert daily['exists'] and daily['rows'] == 6 and daily['codes'] == 2
+    assert daily['earliest'] == '2026-01-05' and daily['latest'] == '2026-01-07'
+    assert stats['minute5_data']['rows'] == 0 and stats['minute5_data']['earliest'] is None
+
+
+def test_get_table_stats_no_tables_no_writes(tmp_path, monkeypatch):
+    """create_tables=False 空库：不建表（保证只读）、不崩溃、exists=False"""
+    from sqlalchemy import inspect
+
+    monkeypatch.setattr(config, 'db_type', 'sqlite')
+    storage = DataStorage(db_url='sqlite://', csv_path=str(tmp_path), create_tables=False)
+    stats = storage.get_table_stats()
+
+    assert stats and all(not s['exists'] for s in stats)
+    assert inspect(storage.engine).get_table_names() == []  # 确实没建表
+
+
 def test_get_latest_datetime_returns_datetime_on_sqlite(sqlite_storage):
     """SQLite 的 MAX() 返回 TEXT，必须归一化为 datetime，
     否则增量同步 latest + timedelta 崩溃（第二次 sync 全失败）"""

@@ -4,6 +4,7 @@
 """
 
 import argparse
+import json
 import sys
 from argparse import Namespace
 from typing import Optional
@@ -54,13 +55,6 @@ def sync_single_stock_min_data(
     # DB 中 code 为纯 6 位数字（reader 写入时会截取），查询时需匹配
     db_code = code[-6:] if len(code) > 6 else code
 
-    # 精确增量：查询该股票的最新日期
-    if incremental and not start_date:
-        latest = storage.get_latest_datetime_by_code('minute5_data', db_code)
-        if latest:
-            start_date = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
-            logger.debug(f"{code} 增量起始日期: {start_date}")
-
     # 读取5分钟数据
     df_5min = reader.read_5min_data(market, code)
     if df_5min.empty:
@@ -90,8 +84,15 @@ def sync_single_stock_min_data(
     has_data = False
     for df, freq, table_name in freq_data:
         processed = processor.process_min_data(df)
-        if start_date:
-            processed = processor.filter_data_min(processed, start_date=start_date)
+        # 增量起点按表分别计算（issue #11）：只查 minute5 的话，
+        # 衍生表（15/30/60）一旦落后或缺失，重采样结果会被统一起点过滤掉，永远补不回
+        table_start = start_date
+        if incremental and not start_date:
+            latest = storage.get_latest_datetime_by_code(table_name, db_code)
+            if latest:
+                table_start = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
+        if table_start:
+            processed = processor.filter_data_min(processed, start_date=table_start)
         if processed.empty:
             continue
         has_data = True
@@ -290,6 +291,10 @@ def parse_args() -> Namespace:
     # 一键同步（日线 + 分钟线增量同步到数据库）
     subparsers.add_parser('sync', help='一键增量同步所有数据到数据库（日线 + 5/15/30/60分钟线）')
 
+    # 数据库状态一览（只读，不需要 TDX_PATH）
+    status_parser = subparsers.add_parser('status', help='数据库状态一览：每表行数/覆盖股票数/日期范围（只读）')
+    status_parser.add_argument('--json', action='store_true', help='输出机器可读 JSON')
+
     return parser.parse_args()
 
 def update_config(args: Namespace) -> None:
@@ -324,28 +329,13 @@ def update_config(args: Namespace) -> None:
     if args.no_tqdm:
         config.use_tqdm = False
 
-def main() -> int:
-    """主函数
-
-    Returns:
-        int: 程序退出码，0表示成功，非0表示失败
-    """
-    args = parse_args()
-    update_config(args)
-
-    # 初始化数据读取器
+def _init_storage(create_tables: bool = True) -> Optional[DataStorage]:
+    """初始化 DataStorage，失败时打印指引并返回 None"""
     try:
-        reader = TdxDataReader()
-    except (ValueError, FileNotFoundError) as e:
-        logger.error(f"初始化失败: {e}")
-        return 1
-
-    # 初始化数据存储器
-    try:
-        storage = DataStorage()
+        return DataStorage(create_tables=create_tables)
     except ValueError as e:
         logger.error(f"数据库配置错误: {e}")
-        return 1
+        return None
     except OperationalError as e:
         logger.error(f"数据库连接失败: {e.orig if e.orig else e}")
         logger.error(
@@ -355,6 +345,74 @@ def main() -> int:
             f"MySQL: CREATE DATABASE {config.db_name}）\n"
             "  3) .env 中 DB_USER / DB_PASSWORD 等配置是否正确"
         )
+        return None
+
+
+def run_status(storage: DataStorage, as_json: bool = False) -> int:
+    """status 子命令：数据库状态一览（只读）
+
+    数据走 stdout print（可管道/重定向），错误走 logger。
+    """
+    stats = storage.get_table_stats()
+    by_name = {s['table']: s for s in stats}
+
+    # 衍生分钟表覆盖检查：15/30/60 覆盖股票数少于 minute5 说明存在缺口（issue #11 场景）
+    warnings = []
+    m5 = by_name.get('minute5_data', {})
+    if m5.get('codes'):
+        for tbl in ('minute15_data', 'minute30_data', 'minute60_data'):
+            t = by_name.get(tbl, {})
+            if t.get('exists') and t.get('codes', 0) < m5['codes']:
+                warnings.append(
+                    f"{tbl} 覆盖 {t['codes']} 只股票，少于 minute5_data 的 {m5['codes']} 只，"
+                    "存在衍生表缺口；重跑 `tdx2db minutes --db-only --incremental` 可自动补齐"
+                )
+
+    if as_json:
+        print(json.dumps({'tables': stats, 'warnings': warnings}, ensure_ascii=False, indent=2))
+        return 0
+
+    print(f"{'表名':<18}{'行数':>14}{'股票数':>10}  {'最早':<18}{'最新':<18}")
+    print('-' * 80)
+    for s in stats:
+        if not s['exists']:
+            print(f"{s['table']:<18}{'（未创建，运行 sync 后自动建表）':<40}")
+            continue
+        print(
+            f"{s['table']:<18}{s['rows']:>14,}{s['codes']:>10}  "
+            f"{s['earliest'] or '-':<18}{s['latest'] or '-':<18}"
+        )
+    for w in warnings:
+        print(f"\n⚠️  {w}")
+    return 0
+
+
+def main() -> int:
+    """主函数
+
+    Returns:
+        int: 程序退出码，0表示成功，非0表示失败
+    """
+    args = parse_args()
+    update_config(args)
+
+    # status 是纯数据库只读命令：不需要 TDX_PATH，也不建表
+    if args.command == 'status':
+        storage = _init_storage(create_tables=False)
+        if storage is None:
+            return 1
+        return run_status(storage, as_json=args.json)
+
+    # 初始化数据读取器
+    try:
+        reader = TdxDataReader()
+    except (ValueError, FileNotFoundError) as e:
+        logger.error(f"初始化失败: {e}")
+        return 1
+
+    # 初始化数据存储器
+    storage = _init_storage()
+    if storage is None:
         return 1
 
     # 处理子命令
