@@ -15,7 +15,7 @@ import pandas as pd
 from pytdx.reader import TdxDailyBarReader, TdxMinBarReader, TdxLCMinBarReader
 from tqdm import tqdm
 
-from .config import config
+from .config import config, default_tdx_candidates, detect_tdx_path
 from .logger import logger
 from .processor import DataProcessor
 
@@ -30,7 +30,18 @@ class TdxDataReader:
         """
         self.tdx_path = tdx_path or config.tdx_path
         if not self.tdx_path:
-            raise ValueError("通达信数据路径未设置，请在.env文件中设置TDX_PATH或在初始化时提供")
+            # 未显式配置时探测常见安装路径（issue #32），显式配置永远优先
+            detected = detect_tdx_path()
+            if detected:
+                logger.info(f"TDX_PATH 未配置，已自动探测到通达信目录: {detected}")
+                self.tdx_path = detected
+            else:
+                hint = ""
+                if os.name == 'nt':
+                    hint = f"（已探测以下路径均无 vipdoc: {', '.join(default_tdx_candidates())}）"
+                raise ValueError(
+                    "通达信数据路径未设置，请在 .env 中设置 TDX_PATH 或使用 --tdx-path 指定" + hint
+                )
 
         self.tdx_path = Path(self.tdx_path)
         if not self.tdx_path.exists():
