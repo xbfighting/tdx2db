@@ -21,6 +21,9 @@ tdx2db minutes --db-only --auto-start --incremental
 
 # 同步股票列表
 tdx2db stock-list --db-only
+
+# 数据库状态一览（只读，不需要 TDX_PATH；--json 机器可读）
+tdx2db status
 ```
 
 `python main.py <子命令>` 与 `tdx2db <子命令>` 等价（main.py 是薄封装，保留老用户习惯）。包目录为 `tdx2db/`（v0.3.0 起从 `src/` 改名，发布到 PyPI）。psycopg2-binary/pymysql 为可选依赖（extras: postgres/mysql/all），默认安装仅支持 SQLite。
