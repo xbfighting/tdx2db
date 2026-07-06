@@ -9,12 +9,39 @@
 
 import os
 from pathlib import Path
+from typing import List, Optional
+
 from dotenv import find_dotenv, load_dotenv
 
 # 加载 .env：usecwd=True 从当前工作目录向上查找。
 # 默认行为是从本文件所在目录（pip 安装后为 site-packages）向上找，
 # 导致 pip 安装的用户放在工作目录的 .env 被静默忽略（PR #31 review 发现）
 load_dotenv(find_dotenv(usecwd=True))
+
+# Windows 常见通达信安装位置（盘符 × 目录名，探测顺序即优先级）
+_TDX_DRIVES = ('C:/', 'D:/', 'E:/')
+_TDX_DIRNAMES = ('new_tdx', 'zd_zsone', 'tdx', 'new_jyplug')
+
+
+def default_tdx_candidates() -> List[str]:
+    """Windows 下的默认探测候选路径列表"""
+    return [drive + name for drive in _TDX_DRIVES for name in _TDX_DIRNAMES]
+
+
+def detect_tdx_path(candidates: Optional[List[str]] = None) -> Optional[str]:
+    """探测通达信安装目录：目录下存在 vipdoc 子目录即视为有效，返回首个命中。
+
+    仅应在 TDX_PATH 未显式配置时调用。candidates 为 None 时使用 Windows
+    默认候选；非 Windows 平台不做盘符探测（挂载路径因人而异），返回 None。
+    """
+    if candidates is None:
+        if os.name != 'nt':
+            return None
+        candidates = default_tdx_candidates()
+    for cand in candidates:
+        if (Path(cand) / 'vipdoc').is_dir():
+            return str(cand)
+    return None
 
 
 class Config:

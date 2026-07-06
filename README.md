@@ -33,7 +33,9 @@ createdb tdx_data                                  # PostgreSQL
 在**运行命令的目录**下创建 `.env` 文件（`.env` 从当前工作目录读取；也可以直接用环境变量或命令行参数）：
 
 ```ini
-# 通达信安装目录（必填）。判断标准：该目录下应存在 vipdoc/sz/lday/*.day 文件
+# 通达信安装目录。判断标准：该目录下应存在 vipdoc/sz/lday/*.day 文件
+# Windows 下装在常见默认路径（C:/D:/E: 盘的 new_tdx / zd_zsone / tdx / new_jyplug）时
+# 可以不配置——程序会自动探测；显式配置永远优先
 TDX_PATH=C:\new_tdx                # Windows
 # TDX_PATH=/Volumes/share/new_tdx  # macOS（SMB 挂载 Windows 共享）
 # TDX_PATH=/mnt/share/new_tdx     # Linux（CIFS 挂载）
