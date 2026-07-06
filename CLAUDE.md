@@ -32,6 +32,17 @@ tdx2db status
 
 测试：`pytest tests/`（processor 纯函数 + 模块导入冒烟，CI 三矩阵 3.9/3.10/3.11 运行）。数据正确性验证仍以运行 `sync` 后检查数据库为准。
 
+## 发布 PyPI（维护者）
+
+版本号需同步 bump 两处：`pyproject.toml` 与 `tdx2db/__init__.py`（教训：v0.3.0 曾漏改后者）。发布 token 为项目级，存本地 `.env` 的 `PYPI_PROJECT_TOKEN`（gitignored，勿打印其值）：
+
+```bash
+rm -rf dist && uv build
+UV_PUBLISH_TOKEN=$(grep '^PYPI_PROJECT_TOKEN=' .env | cut -d= -f2-) uv publish
+```
+
+发布后必须在全新 venv `pip install tdx2db==<版本>` 验证（含从工作目录读 `.env` 的脚本入口场景，教训见 v0.3.1）。增量/幂等类改动的冒烟必须跑两轮（首轮全量 + 次轮增量）。
+
 ## 架构
 
 四层管道，单向数据流：
