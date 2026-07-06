@@ -6,12 +6,12 @@ import pytest
 
 
 @pytest.mark.parametrize('module', [
-    'src.config',
-    'src.logger',
-    'src.processor',
-    'src.reader',
-    'src.storage',
-    'src.cli',
+    'tdx2db.config',
+    'tdx2db.logger',
+    'tdx2db.processor',
+    'tdx2db.reader',
+    'tdx2db.storage',
+    'tdx2db.cli',
 ])
 def test_module_imports(module):
     importlib.import_module(module)

@@ -1,25 +1,48 @@
-[tool.poetry]
+[project]
 name = "tdx2db"
-version = "0.2.0"
+version = "0.3.0"
 description = "读取本地通达信(TDX)股票数据，增量同步到 PostgreSQL/MySQL/SQLite"
-authors = ["我如此拉风 <xbfighting@hotmail.com>"]
+authors = [{ name = "我如此拉风", email = "xbfighting@hotmail.com" }]
 license = "MIT"
 readme = "README.md"
-packages = [{ include = "src" }]
+requires-python = ">=3.9,<4"
+keywords = ["tdx", "通达信", "stock", "quant", "a-share"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "pytdx>=1.72,<2",
+    "pandas>=2.2.3,<3",
+    "sqlalchemy>=2.0.40,<3",
+    "tqdm>=4.67.1,<5",
+    "python-dotenv>=1.1.0,<2",
+]
 
-[tool.poetry.dependencies]
-python = ">=3.9,<4"
-pytdx = "^1.72"
-pandas = "^2.2.3"
-sqlalchemy = "^2.0.40"
-tqdm = "^4.67.1"
-python-dotenv = "^1.1.0"
-pymysql = "^1.1.1"
-psycopg2-binary = "^2.9.10"
+[project.optional-dependencies]
+postgres = ["psycopg2-binary>=2.9.10,<3"]
+mysql = ["pymysql>=1.1.1,<2"]
+all = ["psycopg2-binary>=2.9.10,<3", "pymysql>=1.1.1,<2"]
+
+[project.scripts]
+tdx2db = "tdx2db.cli:entry"
+
+[project.urls]
+Homepage = "https://github.com/xbfighting/tdx2db"
+Repository = "https://github.com/xbfighting/tdx2db"
+Issues = "https://github.com/xbfighting/tdx2db/issues"
+
+[tool.poetry]
+packages = [{ include = "tdx2db" }]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core>=2.0"]
 build-backend = "poetry.core.masonry.api"

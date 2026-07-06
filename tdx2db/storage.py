@@ -215,7 +215,17 @@ class DataStorage:
 
         # 初始化数据库连接
         if self.db_url:
-            self.engine = create_engine(self.db_url)
+            try:
+                self.engine = create_engine(self.db_url)
+            except ModuleNotFoundError as e:
+                # 数据库驱动为可选依赖，缺失时给出对应 extras 安装提示
+                extras = {'postgresql': 'postgres', 'mysql': 'mysql'}.get(config.db_type)
+                if extras:
+                    raise ValueError(
+                        f"缺少 {config.db_type} 数据库驱动（{e.name}）。"
+                        f"请安装: pip install 'tdx2db[{extras}]'"
+                    ) from e
+                raise
             Base.metadata.create_all(self.engine)
             self.Session = sessionmaker(bind=self.engine)
 
@@ -237,6 +247,14 @@ class DataStorage:
         df.to_csv(file_path, index=False, encoding='utf-8')
         logger.info(f"数据已保存到: {file_path}")
         return str(file_path)
+
+    @staticmethod
+    def _coerce_datetime(value) -> dt:
+        """MAX(date) 的返回类型因数据库而异：SQLite 返回 TEXT，PG/MySQL 返回日期对象。
+        统一转成 datetime，调用方才能安全做 + timedelta 运算。"""
+        if isinstance(value, str):
+            return pd.to_datetime(value).to_pydatetime()
+        return value
 
     def get_latest_datetime(
         self,
@@ -263,7 +281,7 @@ class DataStorage:
                 )
                 row = result.fetchone()
                 if row and row[0]:
-                    return row[0]
+                    return self._coerce_datetime(row[0])
                 return None
         except Exception as e:
             logger.debug(f"获取表 {table_name} 最新日期时出错: {e}")
@@ -297,7 +315,7 @@ class DataStorage:
                 )
                 row = result.fetchone()
                 if row and row[0]:
-                    return row[0]
+                    return self._coerce_datetime(row[0])
                 return None
         except Exception as e:
             # warning 而非 debug：此查询挂掉会静默退化为全量重扫，用户必须可见

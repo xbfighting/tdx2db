@@ -547,5 +547,16 @@ def main() -> int:
 
     return 0
 
+def entry() -> None:
+    """console script 入口：统一处理中断与未捕获异常的退出码"""
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("\n程序被用户中断")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n程序运行出错: {e}")
+        sys.exit(1)
+
 if __name__ == '__main__':
-    sys.exit(main())
+    entry()

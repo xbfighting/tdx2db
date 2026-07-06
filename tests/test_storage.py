@@ -4,8 +4,8 @@ import pandas as pd
 import pytest
 from sqlalchemy import inspect, text
 
-from src.config import config
-from src.storage import DataStorage
+from tdx2db.config import config
+from tdx2db.storage import DataStorage
 
 
 @pytest.fixture
@@ -51,3 +51,19 @@ def test_duplicate_incremental_insert_is_ignored(sqlite_storage):
 def test_save_incremental_rejects_unknown_table(sqlite_storage):
     with pytest.raises(ValueError):
         sqlite_storage.save_incremental(_daily_df(), 'evil_table', conflict_columns=('code', 'date'))
+
+
+def test_get_latest_datetime_returns_datetime_on_sqlite(sqlite_storage):
+    """SQLite 的 MAX() 返回 TEXT，必须归一化为 datetime，
+    否则增量同步 latest + timedelta 崩溃（第二次 sync 全失败）"""
+    from datetime import datetime, timedelta
+
+    sqlite_storage.save_incremental(_daily_df(), 'daily_data', conflict_columns=('code', 'date'))
+
+    latest = sqlite_storage.get_latest_datetime('daily_data', date_column='date')
+    by_code = sqlite_storage.get_latest_datetime_by_code('daily_data', '000001', date_column='date')
+
+    for value in (latest, by_code):
+        assert isinstance(value, datetime), type(value)
+        # 增量路径的实际用法必须可运算
+        assert (value + timedelta(days=1)).strftime('%Y-%m-%d') == '2026-01-08'

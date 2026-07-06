@@ -3,7 +3,7 @@
 import pytest
 from sqlalchemy import URL
 
-from src.config import config
+from tdx2db.config import config
 
 
 @pytest.fixture
