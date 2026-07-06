@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from src.processor import DataProcessor, MA_WINDOWS
+from tdx2db.processor import DataProcessor, MA_WINDOWS
 
 
 @pytest.fixture

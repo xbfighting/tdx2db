@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.cli import infer_market, parse_args
+from tdx2db.cli import infer_market, parse_args
 
 
 class TestInferMarket:

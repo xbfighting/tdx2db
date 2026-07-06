@@ -711,9 +711,10 @@ xml = ["lxml (>=4.9.2)"]
 name = "psycopg2-binary"
 version = "2.9.12"
 description = "psycopg2 - Python-PostgreSQL Database Adapter"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"postgres\" or extra == \"all\""
 files = [
     {file = "psycopg2_binary-2.9.12-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:9b818ceff717f98851a64bffd4c5eb5b3059ae280276dcecc52ac658dcf006a4"},
     {file = "psycopg2_binary-2.9.12-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:d2fa0d7caca8635c56e373055094eeda3208d901d55dd0ff5abc1d4e47f82b56"},
@@ -814,9 +815,10 @@ files = [
 name = "pymysql"
 version = "1.2.0"
 description = "Pure Python MySQL Driver"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"mysql\" or extra == \"all\""
 files = [
     {file = "pymysql-1.2.0-py3-none-any.whl", hash = "sha256:62169ce6d5510f08e140c5e7990ee884a9764024e4a9a27b2cc11f1099322ae0"},
     {file = "pymysql-1.2.0.tar.gz", hash = "sha256:6c7b17ca686988104d7426c27895b455cdeea3e9d3ceb1270f0c3704fead8c33"},
@@ -1056,7 +1058,12 @@ files = [
     {file = "tzdata-2026.2.tar.gz", hash = "sha256:9173fde7d80d9018e02a662e168e5a2d04f87c41ea174b139fbef642eda62d10"},
 ]
 
+[extras]
+all = ["psycopg2-binary", "pymysql"]
+mysql = ["pymysql"]
+postgres = ["psycopg2-binary"]
+
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.9,<4"
-content-hash = "88239782b8369940fedc4c9c0b1f55512e75b9b39f58db8813e9a4262ba36e15"
+content-hash = "a1970d87bb8fb7862aea2dc70a882bf39885839f101a842807286ce63ff0de5d"

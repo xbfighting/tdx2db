@@ -30,7 +30,7 @@
 ## 开发环境
 
 ```bash
-pip install -r requirements.txt
+pip install -e '.[all]'     # 可编辑安装，含 postgres/mysql 驱动，并创建 tdx2db 命令
 cp .env.example .env        # 跑单元测试不需要真实 TDX 数据和数据库
 pytest tests/
 ```
