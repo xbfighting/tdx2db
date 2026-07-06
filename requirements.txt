@@ -1,3 +1,5 @@
+# 仅供 legacy 用户（clone + python main.py 的旧安装方式）。
+# 推荐方式见 README：pip install tdx2db / 开发用 pip install -e '.[all]'
 pytdx>=1.72
 pandas>=2.2.3
 sqlalchemy>=2.0.40
