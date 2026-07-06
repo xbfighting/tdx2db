@@ -9,19 +9,21 @@ tdx2db：从本地通达信(TDX)行情软件读取 A 股数据，增量同步到
 ## 常用命令
 
 ```bash
-# 安装依赖
-pip install -r requirements.txt
+# 安装依赖（开发模式，含 postgres/mysql 驱动）
+pip install -e '.[all]'
 
 # 一键增量同步（日线 + 5/15/30/60 分钟线）— 日常使用这一个命令即可
-python main.py sync
+tdx2db sync
 
 # 单独同步
-python main.py daily --db-only --auto-start --incremental
-python main.py minutes --db-only --auto-start --incremental
+tdx2db daily --db-only --auto-start --incremental
+tdx2db minutes --db-only --auto-start --incremental
 
 # 同步股票列表
-python main.py stock-list --db-only
+tdx2db stock-list --db-only
 ```
+
+`python main.py <子命令>` 与 `tdx2db <子命令>` 等价（main.py 是薄封装，保留老用户习惯）。包目录为 `tdx2db/`（v0.3.0 起从 `src/` 改名，发布到 PyPI）。psycopg2-binary/pymysql 为可选依赖（extras: postgres/mysql/all），默认安装仅支持 SQLite。
 
 测试：`pytest tests/`（processor 纯函数 + 模块导入冒烟，CI 三矩阵 3.9/3.10/3.11 运行）。数据正确性验证仍以运行 `sync` 后检查数据库为准。
 
@@ -58,7 +60,7 @@ CLI (cli.py)  → Reader (reader.py) → Processor (processor.py) → Storage (s
 | `stock_info` | code | 股票列表 |
 | `block_stock_relation` | — | 板块关系（未完整实现） |
 
-唯一约束已内建于 `src/storage.py` 的模型定义（`create_all` 自动创建）；仅老库（PR #17 之前建的表）需执行 `scripts/add_constraints.sql` / `add_constraints_mysql.sql` 迁移。
+唯一约束已内建于 `tdx2db/storage.py` 的模型定义（`create_all` 自动创建）；仅老库（PR #17 之前建的表）需执行 `scripts/add_constraints.sql` / `add_constraints_mysql.sql` 迁移。
 
 ### 股票代码格式
 

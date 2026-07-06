@@ -7,13 +7,14 @@ labels: bug
 **环境**
 - 操作系统：<!-- Windows 11 / macOS 15 / Ubuntu 24.04 -->
 - Python 版本：
+- tdx2db 版本与安装方式：<!-- pip install tdx2db / 源码运行 -->
 - 数据库类型与版本：<!-- PostgreSQL 16 / MySQL 8 / SQLite -->
 - 通达信版本与 TDX_PATH 所在位置：<!-- 本机 / SMB 挂载 -->
 
 **复现命令**
 
 ```bash
-python main.py ...
+tdx2db ...
 ```
 
 **实际结果**（完整报错日志/关键输出，请贴文本不要截图）
