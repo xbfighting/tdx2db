@@ -8,10 +8,11 @@ import os
 import sys
 from typing import Optional
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 # 确保 .env 已加载（无论 logger 与 config 的导入先后），load_dotenv 幂等
-load_dotenv()
+# usecwd=True 理由见 config.py
+load_dotenv(find_dotenv(usecwd=True))
 
 
 def _level_from_env() -> int:

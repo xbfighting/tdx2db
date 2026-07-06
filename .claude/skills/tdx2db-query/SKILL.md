@@ -74,4 +74,4 @@ SELECT
 | 某票查无数据 | 收录范围：仅深 000/001/002/300/301、沪 60/688 | 北交所/ETF/指数不收录，属预期 |
 | 分钟表行数远少于日线 | `status` 的 warnings | `tdx2db minutes --db-only --incremental` 自愈 |
 | 当日行数骤降 | 覆盖度自检 SQL | 通达信补做盘后下载 → 重跑 sync |
-| 增量后仍缺历史 | 该票是否新入库（新股全历史应自动补） | 用 `tdx2db daily --code XXX --db-only` 单票重同步
+| 增量后仍缺历史 | 该票是否新入库（新股全历史应自动补） | 用 `tdx2db daily --code XXX --db-only --incremental` 单票重同步（必须带 --incremental，否则已有行会触发唯一约束冲突报错）
