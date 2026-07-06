@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 import pandas as pd
-from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, MetaData, Table, UniqueConstraint, text
+from sqlalchemy import create_engine, inspect, Column, Integer, Float, String, DateTime, MetaData, Table, UniqueConstraint, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from tqdm import tqdm
@@ -191,6 +191,16 @@ _VALID_TABLES = frozenset({
     'stock_info', 'block_stock_relation',
 })
 
+# status 命令统计的表及其日期列（stock_info 无日期列）
+_STATS_TABLES = (
+    ('stock_info', None),
+    ('daily_data', 'date'),
+    ('minute5_data', 'datetime'),
+    ('minute15_data', 'datetime'),
+    ('minute30_data', 'datetime'),
+    ('minute60_data', 'datetime'),
+)
+
 
 class DataStorage:
     """数据存储类"""
@@ -198,13 +208,15 @@ class DataStorage:
     def __init__(
         self,
         db_url: Optional[str] = None,
-        csv_path: Optional[str] = None
+        csv_path: Optional[str] = None,
+        create_tables: bool = True
     ) -> None:
         """初始化数据存储
 
         Args:
             db_url: 数据库连接URL，如果为None则使用配置中的URL
             csv_path: CSV文件保存路径，如果为None则使用配置中的路径
+            create_tables: 是否自动建表。status 等只读命令传 False，保证不产生任何写操作
         """
         self.db_url = db_url or config.database_url
         self.csv_path = csv_path or config.csv_output_path
@@ -226,7 +238,8 @@ class DataStorage:
                         f"请安装: pip install 'tdx2db[{extras}]'"
                     ) from e
                 raise
-            Base.metadata.create_all(self.engine)
+            if create_tables:
+                Base.metadata.create_all(self.engine)
             self.Session = sessionmaker(bind=self.engine)
 
     def save_to_csv(self, df: pd.DataFrame, filename: str) -> Optional[str]:
@@ -247,6 +260,36 @@ class DataStorage:
         df.to_csv(file_path, index=False, encoding='utf-8')
         logger.info(f"数据已保存到: {file_path}")
         return str(file_path)
+
+    def get_table_stats(self) -> list:
+        """统计每张表的行数、覆盖股票数、日期范围。只读，供 status 命令使用。
+
+        Returns:
+            list[dict]: 每表一项：table / exists / rows / codes / earliest / latest。
+            表不存在时 exists=False（status 用 create_tables=False 初始化，不建表）
+        """
+        existing = set(inspect(self.engine).get_table_names())
+        stats = []
+        with self.engine.connect() as conn:
+            for table, date_col in _STATS_TABLES:
+                entry = {'table': table, 'exists': table in existing,
+                         'rows': 0, 'codes': 0, 'earliest': None, 'latest': None}
+                if not entry['exists']:
+                    stats.append(entry)
+                    continue
+                entry['rows'] = conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar() or 0
+                entry['codes'] = conn.execute(
+                    text(f"SELECT COUNT(DISTINCT code) FROM {table}")
+                ).scalar() or 0
+                if date_col and entry['rows']:
+                    mn, mx = conn.execute(
+                        text(f"SELECT MIN({date_col}), MAX({date_col}) FROM {table}")
+                    ).one()
+                    fmt = '%Y-%m-%d' if date_col == 'date' else '%Y-%m-%d %H:%M'
+                    entry['earliest'] = self._coerce_datetime(mn).strftime(fmt)
+                    entry['latest'] = self._coerce_datetime(mx).strftime(fmt)
+                stats.append(entry)
+        return stats
 
     @staticmethod
     def _coerce_datetime(value) -> dt:
