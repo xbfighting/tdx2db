@@ -11,10 +11,12 @@ import os
 from pathlib import Path
 from typing import List, Optional
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
-# 加载.env文件中的环境变量
-load_dotenv()
+# 加载 .env：usecwd=True 从当前工作目录向上查找。
+# 默认行为是从本文件所在目录（pip 安装后为 site-packages）向上找，
+# 导致 pip 安装的用户放在工作目录的 .env 被静默忽略（PR #31 review 发现）
+load_dotenv(find_dotenv(usecwd=True))
 
 # Windows 常见通达信安装位置（盘符 × 目录名，探测顺序即优先级）
 _TDX_DRIVES = ('C:/', 'D:/', 'E:/')

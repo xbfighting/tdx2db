@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 tdx2db：从本地通达信(TDX)行情软件读取 A 股数据，增量同步到数据库。是量化分析工作站的数据入口。
 
+本文件面向**贡献者**（改 tdx2db 代码）。如果你是在**消费数据库**（查询 daily_data 等表做分析），请读 `AGENTS.md`——schema、典型查询、陷阱清单都在那里，配套 skill 见 `.claude/skills/tdx2db-query/`。
+
 ## 常用命令
 
 ```bash
