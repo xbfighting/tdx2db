@@ -6,6 +6,27 @@
 
 读取本地通达信股票数据（日线 + 5/15/30/60 分钟线），增量同步到数据库。适合想用 SQL / pandas 做 A 股量化分析、又不想依赖收费行情 API 的人。
 
+## 定位与同类项目
+
+tdx2db 做一件事：**把通达信本地数据变成你自己的 SQL 数据库资产**。差异化在管道可靠性：
+
+- **增量幂等、断点自愈**：起点按股票、按表分别计算，中断重跑不丢数据不重复；衍生分钟表缺口增量重跑自动补齐
+- **状态可观测**：`tdx2db status` 一眼确认每表行数/覆盖/日期范围，"退出码 0 ≠ 数据进去了"有官方验证手段
+- **无幸存者偏差**：数据来自本地 vipdoc 文件，已退市股票的历史仍在
+- **AI agent 就绪**：`AGENTS.md` + Claude Code skill 提供显式的 agent 使用契约
+
+与同类开源项目的分工（事实性对比，各有侧重）：
+
+| 项目 | 数据来源 | 产出形态 | 状态* |
+|------|----------|----------|------|
+| **tdx2db** | 本地 vipdoc 文件 | PostgreSQL / MySQL / SQLite（增量同步） | 活跃 |
+| [easy_tdx](https://github.com/handsomejustin/easy_tdx) | 通达信协议在线直连 | DataFrame / JSON / REST（含指标、回测） | 活跃 |
+| [tdx-api](https://github.com/oficcejo/tdx-api) | 通达信协议在线直连 | Docker 部署的 REST 实时接口 | 活跃 |
+| [rustdx](https://github.com/zjp-CN/rustdx) | 本地 .day + 东方财富 | CSV / ClickHouse / MongoDB（含复权因子） | 低频维护 |
+| [mootdx](https://github.com/mootdx/mootdx) / [pytdx](https://github.com/rainx/pytdx) | 本地文件 + 在线协议 | DataFrame 读取库 | 已停更 |
+
+\* 状态为 2026-07 快照。需要实时行情选在线直连类项目；需要可 SQL 查询、可增量维护的历史数据资产，选 tdx2db。
+
 ## 安装
 
 ```bash
