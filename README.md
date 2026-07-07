@@ -184,7 +184,7 @@ tdx2db minutes --csv-only
 **⚠️ code 格式差异（跨表查询必读）**：`stock_info.code` 带市场前缀（`sz000001` / `sh600000`），而 `daily_data` / `minute*_data` 的 code 是 **6 位纯数字**（`000001`）。跨表 JOIN 需要 `RIGHT(stock_info.code, 6)` 或等价处理——这是最容易踩的坑。
 
 **已知限制**：
-- `stock_info.name` 目前是 `深Asz000001` 式占位符，不是真实股票名称
+- `stock_info.name` 为真实股票名称（来自通达信本地 infoharbor_ex.code，缺失时回退占位符）
 - 收录范围：深市 `000 / 001 / 002 / 300 / 301`，沪市 `60xxxx / 688xxx`；**北交所、ETF、指数暂未纳入**
 
 ## FAQ

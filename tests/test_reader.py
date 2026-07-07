@@ -65,6 +65,30 @@ class TestDailyParsing:
             tdx_reader.read_daily_data(0, 'sz999999')
 
 
+class TestStockListNames:
+    def test_real_names_from_infoharbor_ex(self, tmp_path):
+        """stock_info.name 用 infoharbor_ex.code 真名（issue #42），code 保持带前缀"""
+        for m, f in [('sz', 'sz000001.day'), ('sh', 'sh688001.day')]:
+            d = tmp_path / 'vipdoc' / m / 'lday'
+            d.mkdir(parents=True)
+            shutil.copy(FIXTURES / f, d / f)
+        hq = tmp_path / 'T0002' / 'hq_cache'
+        hq.mkdir(parents=True)
+        (hq / 'infoharbor_ex.code').write_bytes(
+            '000001|平安银行|平安保险,谢永林\n688001|华兴源创|陈文源\n'.encode('gbk')
+        )
+        df = TdxDataReader(tdx_path=str(tmp_path)).get_stock_list()
+        names = dict(zip(df.code, df.name))
+        assert names == {'sz000001': '平安银行', 'sh688001': '华兴源创'}
+
+    def test_fallback_placeholder_when_file_missing(self, tdx_reader):
+        """名称文件缺失回退占位符，不报错"""
+        df = tdx_reader.get_stock_list()
+        names = dict(zip(df.code, df.name))
+        assert names['sz000001'] == '深Asz000001'
+        assert names['sh688001'] == '上Ash688001'
+
+
 @pytest.fixture
 def real_tdx_reader(tmp_path):
     """真实文件切片（dd bs=32 count=3 自实际 vipdoc，2026-07-07）——
