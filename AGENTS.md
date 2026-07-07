@@ -79,7 +79,7 @@ SELECT
 
 ## 需要复权时（消费端自助，库本身永远不复权）
 
-窗口内有分红除权的股票，不复权价格会出现跳空——这是数据特征不是 bug。消费端自助复权的成熟做法是**涨跌幅复权 factor 法**（参考 [rustdx 的实现与 SQL 范例](https://github.com/zjp-CN/rustdx#通达信数据)，原理见其作者的[《涨跌幅复权与前复权》](https://zjp-cn.github.io/posts/qfq/)）：
+窗口内有分红除权的股票，不复权价格会出现跳空——这是数据特征不是 bug。消费端自助复权的成熟做法是**涨跌幅复权 factor 法**（参考 [rustdx 的实现与 SQL 范例](https://github.com/zjp-CN/rustdx#使用示例)，原理见其作者的[《涨跌幅复权与前复权》](https://zjp-cn.github.io/posts/qfq/)）：
 
 1. 从除权除息信息（通达信 gbbq 股本变迁文件，或任意财经数据源）算出除权日调整后的 preclose
 2. factor = 每日 (close / preclose) 累乘；增量维护时新 factor = 昨日 factor × (今收 / 今前收)，永不重算历史
