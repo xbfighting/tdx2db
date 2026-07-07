@@ -69,6 +69,17 @@ WHERE b.block_type = '概念' AND b.block_name = '人形机器人' AND d.date = 
 ```
 板块表为全量快照（随 sync 更新，无历史版本）；板块名以 tdxzs.cfg 官方全名为准，跨口径对齐用 block_code。
 
+**换手率 / 次新股过滤**（股本与上市日期在 stock_info，万股，快照口径）
+```sql
+-- 换手率(%)：volume(手)/ltag(万股) 单位差恰好抵消；股本变动点前的历史值失真
+SELECT d.date, d.volume / s.ltag AS turnover_pct
+FROM daily_data d JOIN stock_info s ON RIGHT(s.code, 6) = d.code
+WHERE d.code = :code6 ORDER BY d.date DESC LIMIT 20;
+
+-- 剔除次新股（上市不足 500 天）
+SELECT RIGHT(code, 6) FROM stock_info WHERE list_date < CURRENT_DATE - 500;
+```
+
 **覆盖度自检**（跑批前防"同步不完整静默算子集"）
 ```sql
 SELECT
