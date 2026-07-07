@@ -288,8 +288,13 @@ def parse_args() -> Namespace:
     min_parser.add_argument('--incremental', action='store_true', help='增量同步模式，跳过重复数据')
 
 
+    # 板块-个股关系同步
+    blocks_parser = subparsers.add_parser('blocks', help='同步板块-个股关系（行业/概念/指数/地区，来自通达信本地板块文件）')
+    blocks_parser.add_argument('--csv-only', action='store_true', help='仅保存到CSV')
+    blocks_parser.add_argument('--db-only', action='store_true', help='仅保存到数据库')
+
     # 一键同步（日线 + 分钟线增量同步到数据库）
-    subparsers.add_parser('sync', help='一键增量同步所有数据到数据库（日线 + 5/15/30/60分钟线）')
+    subparsers.add_parser('sync', help='一键增量同步所有数据到数据库（日线 + 5/15/30/60分钟线 + 板块关系）')
 
     # 数据库状态一览（只读，不需要 TDX_PATH）
     status_parser = subparsers.add_parser('status', help='数据库状态一览：每表行数/覆盖股票数/日期范围（只读）')
@@ -328,6 +333,23 @@ def update_config(args: Namespace) -> None:
     # 更新进度条配置
     if args.no_tqdm:
         config.use_tqdm = False
+
+def sync_blocks(storage: DataStorage, to_csv: bool = False, to_db: bool = True) -> bool:
+    """同步板块-个股关系（全量替换式快照）
+
+    单链文件缺失在解析层降级为 WARNING；全部缺失（df 为空）不写库。
+    """
+    from .blocks import collect_block_relations
+
+    df = collect_block_relations(config.tdx_path)
+    if df.empty:
+        logger.warning("未解析到任何板块关系（板块文件缺失？），跳过写入")
+        return False
+    csv_path, db_success = storage.save_block_relation(df, to_csv=to_csv, to_db=to_db)
+    if to_db and db_success:
+        logger.info(f"板块关系已入库: {len(df)} 条")
+    return (not to_db) or db_success
+
 
 def _init_storage(create_tables: bool = True) -> Optional[DataStorage]:
     """初始化 DataStorage，失败时打印指引并返回 None"""
@@ -561,6 +583,18 @@ def main() -> int:
             logger.error(f"获取分钟线数据时出错: {e}")
             return 1
 
+    elif args.command == 'blocks':
+        try:
+            success = sync_blocks(
+                storage,
+                to_csv=not args.db_only,
+                to_db=not args.csv_only,
+            )
+            return 0 if success else 1
+        except Exception as e:
+            logger.error(f"同步板块关系时出错: {e}")
+            return 1
+
     elif args.command == 'sync':
         # 一键增量同步所有数据
         import time
@@ -590,6 +624,16 @@ def main() -> int:
                 has_error = True
         except Exception as e:
             logger.error(f"同步分钟线数据时出错: {e}")
+            has_error = True
+
+        # 3. 同步板块关系（秒级；文件缺失在解析层降级，不阻塞行情结果）
+        try:
+            logger.info("=== 同步板块关系 ===")
+            if not sync_blocks(storage):
+                logger.error("同步板块关系时出错")
+                has_error = True
+        except Exception as e:
+            logger.error(f"同步板块关系时出错: {e}")
             has_error = True
 
         elapsed = time.monotonic() - t0

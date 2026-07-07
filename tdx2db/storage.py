@@ -22,17 +22,20 @@ from .logger import logger
 Base = declarative_base()
 
 class BlockStockRelation(Base):
-    """板块股票关系表模型"""
+    """板块股票关系表模型（issue #39：全量替换式快照，无增量语义）
+
+    唯一约束用 (block_type, block_name, code)：block_code 可空
+    （沪深300 等指数板块无 880 码），且同名板块跨体系存在
+    （880302 与 881002 都叫"煤炭开采"，type 不同）。
+    """
     __tablename__ = 'block_stock_relation'
-    # 唯一约束是 save_incremental 增量写入（ON CONFLICT / INSERT IGNORE）的前提，
-    # 缺失时 PG 会报错、MySQL/SQLite 会静默重复累积（issue #16）
-    __table_args__ = (UniqueConstraint('block_code', 'code', name='uq_block_code'),)
+    __table_args__ = (UniqueConstraint('block_type', 'block_name', 'code', name='uq_block_name_code'),)
 
     id = Column(Integer, primary_key=True)
-    block_code = Column(String(20), index=True)  # 板块代码
-    block_name = Column(String(50))  # 板块名称
-    code = Column(String(10), index=True)  # 股票代码
-    name = Column(String(50))  # 股票名称
+    block_type = Column(String(10), index=True)  # 行业/概念/指数/地区/风格/特殊
+    block_code = Column(String(20), index=True, nullable=True)  # 880/881 板块代码，可空
+    block_name = Column(String(50), index=True)  # 板块名称
+    code = Column(String(10), index=True)  # 股票代码（6 位纯数字，与行情表口径一致）
 
 class DailyData(Base):
     """日线数据表模型"""
@@ -191,7 +194,7 @@ _VALID_TABLES = frozenset({
     'stock_info', 'block_stock_relation',
 })
 
-# status 命令统计的表及其日期列（stock_info 无日期列）
+# status 命令统计的表及其日期列（stock_info / block_stock_relation 无日期列）
 _STATS_TABLES = (
     ('stock_info', None),
     ('daily_data', 'date'),
@@ -199,6 +202,7 @@ _STATS_TABLES = (
     ('minute15_data', 'datetime'),
     ('minute30_data', 'datetime'),
     ('minute60_data', 'datetime'),
+    ('block_stock_relation', None),
 )
 
 
@@ -641,13 +645,16 @@ class DataStorage:
         to_db: bool = True,
         batch_size: int = 10000
     ) -> Tuple[Optional[str], bool]:
-        """保存板块与股票的对应关系
+        """保存板块与股票的对应关系（全量替换式快照）
+
+        板块关系没有历史概念（成分调整由通达信盘后文件直接体现），
+        每次同步以 DELETE + INSERT 反映当前快照——与行情表的增量语义不同。
 
         Args:
-            df: 板块与股票对应关系DataFrame
+            df: 列 block_type/block_code/block_name/code
             to_csv: 是否保存到CSV
             to_db: 是否保存到数据库
-            batch_size: 批处理大小，默认10000条记录
+            batch_size: 批处理大小
 
         Returns:
             tuple: (csv_path, db_success)
@@ -659,6 +666,8 @@ class DataStorage:
             csv_path = self.save_to_csv(df, 'block_stock_relation')
 
         if to_db:
+            with self.engine.begin() as conn:
+                conn.execute(text("DELETE FROM block_stock_relation"))
             db_success = self.save_to_database(df, 'block_stock_relation', batch_size=batch_size)
 
         return csv_path, db_success
