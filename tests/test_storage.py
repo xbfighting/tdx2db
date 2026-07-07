@@ -76,6 +76,28 @@ def test_get_table_stats_no_tables_no_writes(tmp_path, monkeypatch):
     assert inspect(storage.engine).get_table_names() == []  # 确实没建表
 
 
+def test_save_stock_info_snapshot_replace(sqlite_storage):
+    """stock_info 快照替换：重写完全替换；坏数据失败整体回滚保留旧快照（issue #45）"""
+    df1 = pd.DataFrame([
+        {'code': 'sz000001', 'name': '平安银行', 'zgb': 1940591.87, 'ltag': 1940560.12,
+         'capital_date': None, 'list_date': None},
+        {'code': 'sh600519', 'name': '贵州茅台', 'zgb': 125008.15, 'ltag': 125008.15,
+         'capital_date': None, 'list_date': None},
+    ])
+    _, ok = sqlite_storage.save_stock_info(df1, to_csv=False)
+    assert ok
+    _, ok = sqlite_storage.save_stock_info(df1.iloc[:1], to_csv=False)  # 重跑不撞唯一约束
+    assert ok
+    with sqlite_storage.engine.connect() as conn:
+        assert conn.execute(text("SELECT COUNT(*) FROM stock_info")).scalar() == 1
+
+    bad = df1.assign(no_such_column='x')
+    _, ok = sqlite_storage.save_stock_info(bad, to_csv=False)
+    assert not ok
+    with sqlite_storage.engine.connect() as conn:
+        assert conn.execute(text("SELECT COUNT(*) FROM stock_info")).scalar() == 1  # 旧快照仍在
+
+
 def test_get_latest_datetime_returns_datetime_on_sqlite(sqlite_storage):
     """SQLite 的 MAX() 返回 TEXT，必须归一化为 datetime，
     否则增量同步 latest + timedelta 崩溃（第二次 sync 全失败）"""

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import os
 
+import pandas as pd
 import pytest
 
 from tdx2db.reader import TdxDataReader
@@ -84,11 +85,48 @@ class TestStockListNames:
         assert names == {'sz000001': '平安银行', 'sh688001': '华兴源创'}
 
     def test_fallback_placeholder_when_file_missing(self, tdx_reader):
-        """名称文件缺失回退占位符，不报错"""
+        """名称文件缺失回退占位符，不报错；股本/日期列为 NULL"""
         df = tdx_reader.get_stock_list()
         names = dict(zip(df.code, df.name))
         assert names['sz000001'] == '深Asz000001'
         assert names['sh688001'] == '上Ash688001'
+        assert df['zgb'].isna().all() and df['list_date'].isna().all()
+
+
+class TestStockListCapital:
+    def test_capital_fields_from_base_dbf(self, tmp_path):
+        """zgb/ltag（万股）与 capital_date/list_date 来自 base.dbf（issue #45）"""
+        from tests.test_blocks import _make_dbf
+
+        for m, f in [('sz', 'sz000001.day'), ('sh', 'sh688001.day')]:
+            d = tmp_path / 'vipdoc' / m / 'lday'
+            d.mkdir(parents=True)
+            shutil.copy(FIXTURES / f, d / f)
+        hq = tmp_path / 'T0002' / 'hq_cache'
+        hq.mkdir(parents=True)
+        _make_dbf(
+            hq / 'base.dbf',
+            [
+                ('0', '000001', '20260425', '1940591.87', '1940560.12', '19910403'),
+                ('1', '688001', '', '', '', ''),   # 空值 → NULL
+            ],
+            fields=[('SC', 2), ('GPDM', 6), ('GXRQ', 8), ('ZGB', 12), ('LTAG', 12), ('SSDATE', 8)],
+        )
+
+        df = TdxDataReader(tdx_path=str(tmp_path)).get_stock_list().set_index('code')
+        pa = df.loc['sz000001']
+        assert pa['zgb'] == pytest.approx(1940591.87)
+        assert pa['ltag'] == pytest.approx(1940560.12)
+        assert str(pa['capital_date']) == '2026-04-25'
+        assert str(pa['list_date']) == '1991-04-03'
+        hx = df.loc['sh688001']
+        assert pd.isna(hx['zgb']) and hx['list_date'] is None
+
+    def test_missing_base_dbf_degrades(self, tdx_reader):
+        """base.dbf 缺失 → 四列 NULL，不报错（tdx_reader fixture 无 T0002）"""
+        df = tdx_reader.get_stock_list()
+        assert set(df.columns) == {'code', 'name', 'zgb', 'ltag', 'capital_date', 'list_date'}
+        assert df['ltag'].isna().all()
 
 
 @pytest.fixture

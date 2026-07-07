@@ -26,9 +26,17 @@ def _write_gbk(path, content):
     path.write_bytes(content.encode('gbk'))
 
 
-def _make_dbf(path, rows):
-    """最小 DBF：字段 SC(2)/GPDM(6)/DY(4)，与真实 base.dbf 同构"""
-    fields = [('SC', 2), ('GPDM', 6), ('DY', 4)]
+DEFAULT_DBF_FIELDS = [('SC', 2), ('GPDM', 6), ('DY', 4)]
+
+
+def _make_dbf(path, rows, fields=None):
+    """最小 DBF 构造器，与真实 base.dbf 同构
+
+    Args:
+        rows: 每行一个 tuple，顺序与 fields 一致
+        fields: [(字段名, 长度), ...]，默认 SC/GPDM/DY
+    """
+    fields = fields or DEFAULT_DBF_FIELDS
     hlen = 32 + 32 * len(fields) + 1
     rlen = 1 + sum(length for _, length in fields)
     buf = bytearray()
@@ -36,8 +44,11 @@ def _make_dbf(path, rows):
     for name, flen in fields:
         buf += struct.pack('<11sc4xB15x', name.encode(), b'C', flen)
     buf += b'\x0d'
-    for sc, code, dy in rows:
-        buf += b' ' + sc.ljust(2).encode() + code.ljust(6).encode() + dy.ljust(4).encode()
+    for row in rows:
+        rec = b' '
+        for value, (_, flen) in zip(row, fields):
+            rec += str(value).ljust(flen).encode()
+        buf += rec
     path.write_bytes(bytes(buf))
 
 
@@ -160,6 +171,27 @@ class TestCollect:
         (tmp_path / 'T0002' / 'hq_cache').mkdir(parents=True)
         df = collect_block_relations(tmp_path)
         assert df.empty  # 全缺失 → 空 DataFrame，不抛异常
+
+    def test_malformed_dbf_degrades_only_area_chain(self, hq_cache):
+        """base.dbf 缺 DY 字段（ValueError）→ 仅地区链降级，
+        不吞掉已收集的其他链（review 发现：原先 ValueError 会传播丢弃全部 rows）"""
+        hq = hq_cache / 'T0002' / 'hq_cache'
+        _make_dbf(hq / 'base.dbf', [('0', '000711')], fields=[('SC', 2), ('GPDM', 6)])
+
+        df = collect_block_relations(hq_cache)
+        assert '地区' not in set(df.block_type)
+        assert {'概念', '行业'} <= set(df.block_type)
+
+    def test_unreadable_file_degrades_per_chain(self, hq_cache):
+        """文件存在但不可读（#44 同款：SMB 下被运行中的通达信锁定）→
+        该链跳过，其余链正常。用目录冒充文件触发 OSError，跨平台可复现"""
+        hq = hq_cache / 'T0002' / 'hq_cache'
+        (hq / 'infoharbor_block.dat').unlink()
+        (hq / 'infoharbor_block.dat').mkdir()   # read_text 目录 → OSError
+
+        df = collect_block_relations(hq_cache)
+        assert '概念' not in set(df.block_type)        # 该链降级
+        assert {'行业', '地区', '特殊'} <= set(df.block_type)  # 其余链不受影响
 
 
 class TestSnapshotReplace:

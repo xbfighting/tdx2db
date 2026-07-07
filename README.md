@@ -174,7 +174,7 @@ tdx2db minutes --csv-only
 |------|----------|------|
 | `daily_data` | (code, date) | 日线 OHLCV + 均线 |
 | `minute5_data` / `minute15_data` / `minute30_data` / `minute60_data` | (code, datetime) | 分钟线 OHLCV + 均线（15/30/60 由 5 分钟重采样） |
-| `stock_info` | code | 股票列表 |
+| `stock_info` | code | 股票列表：真实名称 + 总股本/流通A股（万股）+ 股本更新日/上市日期 |
 | `block_stock_relation` | (block_type, block_name, code) | 板块-个股关系（行业/概念/指数/地区/风格/特殊），全量快照 |
 
 **板块数据**：来自通达信本地板块文件（`T0002/hq_cache/`），随 `sync` 自动更新，也可单独 `tdx2db blocks --db-only`。行业为 881 研究行业（一/二/三级各一行）；中证500/1000 等跨市场指数成分完整；每次同步为全量替换快照（无历史版本）。老用户需执行一次 `scripts/migrate_block_relation.sql`（表结构变更，原表从未有写入路径）。
@@ -200,6 +200,17 @@ A: 老库缺唯一约束，见"增量同步与唯一约束"一节的自检和迁
 
 **Q: 为什么没有北交所 / ETF / 指数数据？**
 A: 当前 A 股筛选规则只收深市 000/001/002/300/301 和沪市 60/688。北交所（`vipdoc/bj/`）等扩展欢迎提 PR（见 CONTRIBUTING.md）。
+
+**Q: 如何计算换手率？**
+A: `stock_info` 存有流通A股 `ltag`（万股，来自通达信本地 base.dbf，随盘后更新），单位换算后公式恰为：
+
+```sql
+SELECT d.date, d.volume / s.ltag AS turnover_pct
+FROM daily_data d JOIN stock_info s ON RIGHT(s.code, 6) = d.code
+WHERE d.code = '000001' ORDER BY d.date DESC LIMIT 20;
+```
+
+注意：股本是当前快照，股本变动点（配股/增发等）之前的历史换手率会失真；精确历史换手率需自行结合 gbbq 股本变迁数据。`list_date` 上市日期也在 `stock_info` 中，可用于次新股过滤。老库需执行一次 `scripts/migrate_stock_info_capital.sql` 后重跑 `tdx2db stock-list --db-only`。
 
 **Q: 数据是否复权？**
 A: 不复权，且默认口径不会改变（设计决策，见 issue #2）。复权请在消费端处理。
