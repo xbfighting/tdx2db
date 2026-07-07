@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 import pandas as pd
-from sqlalchemy import create_engine, inspect, Column, Integer, Float, String, DateTime, MetaData, Table, UniqueConstraint, text
+from sqlalchemy import create_engine, inspect, Column, Date, Integer, Float, String, DateTime, MetaData, Table, UniqueConstraint, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from tqdm import tqdm
@@ -181,13 +181,22 @@ class Minute60Data(Base):
     ma250 = Column(Float)
 
 class StockInfo(Base):
-    """股票信息表模型"""
+    """股票信息表模型
+
+    股本/日期字段来自 base.dbf（issue #45）：zgb/ltag 单位万股。
+    换手率(%) = daily_data.volume / stock_info.ltag（手 与 万股 的单位差恰好抵消）。
+    股本为当前快照，历史换手率在股本变动点之前失真（精确历史需 gbbq）。
+    """
     __tablename__ = 'stock_info'
 
     id = Column(Integer, primary_key=True)
     code = Column(String(10), unique=True, index=True)
     name = Column(String(50))
     market = Column(Integer)
+    zgb = Column(Float, nullable=True)           # 总股本（万股）
+    ltag = Column(Float, nullable=True)          # 流通A股（万股）
+    capital_date = Column(Date, nullable=True)   # 股本数据更新日（base.dbf GXRQ）
+    list_date = Column(Date, nullable=True)      # 上市日期（base.dbf SSDATE）
 
 # 允许写入的表名白名单
 _VALID_TABLES = frozenset({
@@ -619,6 +628,10 @@ class DataStorage:
     ) -> Tuple[Optional[str], bool]:
         """保存股票信息
 
+        股票列表是全量快照（名称/股本随盘后文件更新），与板块表同用
+        单事务 DELETE+INSERT 替换：可重复运行刷新，失败整体回滚保留旧快照
+        （append 语义重跑会撞 code 唯一约束，issue #45）。
+
         Args:
             df: 股票信息DataFrame
             to_csv: 是否保存到CSV
@@ -635,7 +648,15 @@ class DataStorage:
             csv_path = self.save_to_csv(df, 'stock_info')
 
         if to_db:
-            db_success = self.save_to_database(df, 'stock_info', batch_size=batch_size)
+            try:
+                with self.engine.begin() as conn:
+                    conn.execute(text("DELETE FROM stock_info"))
+                    df.to_sql('stock_info', conn, if_exists='append', index=False, chunksize=batch_size)
+                db_success = True
+                logger.info(f"股票列表已入库: {len(df)} 条")
+            except Exception as e:
+                logger.error(f"股票列表写入失败，已整体回滚、保留旧快照: {e}")
+                db_success = False
 
         return csv_path, db_success
 

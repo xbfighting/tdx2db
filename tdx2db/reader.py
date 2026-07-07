@@ -79,12 +79,56 @@ class TdxDataReader:
                 names[p[0]] = p[1]
         return names
 
+    def _load_capital_info(self) -> dict:
+        """读取股本/日期信息：base.dbf 的 ZGB/LTAG/GXRQ/SSDATE（issue #45）
+
+        缺失/不可读时返回空 dict，对应列降级为 NULL。
+
+        Returns:
+            dict: 6位code -> {'zgb','ltag'(float 万股), 'capital_date','list_date'(date)}
+        """
+        from .blocks import parse_base_dbf
+
+        f = self.tdx_path / 'T0002' / 'hq_cache' / 'base.dbf'
+        try:
+            if not f.exists():
+                logger.warning(f"缺少 {f}，股本/上市日期列置 NULL")
+                return {}
+            raw = parse_base_dbf(f, ('ZGB', 'LTAG', 'GXRQ', 'SSDATE'))
+        except (OSError, ValueError) as e:
+            # 不可读（SMB 下被运行中的通达信锁定，#44 同款）/ 字段缺失均降级
+            logger.warning(f"读取 {f} 失败（{e}），股本/上市日期列置 NULL")
+            return {}
+
+        def _num(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        def _date(v):
+            try:
+                return pd.Timestamp(v).date() if v and len(v) == 8 else None
+            except (ValueError, TypeError):
+                return None
+
+        return {
+            code: {
+                'zgb': _num(row['ZGB']),
+                'ltag': _num(row['LTAG']),
+                'capital_date': _date(row['GXRQ']),
+                'list_date': _date(row['SSDATE']),
+            }
+            for code, row in raw.items()
+        }
+
     def get_stock_list(self) -> pd.DataFrame:
         """获取股票列表
 
         Returns:
-            DataFrame: 包含A股股票代码和名称的DataFrame（不包含B股、基金、等）。
-            name 优先取 infoharbor_ex.code 真实名称，缺失时回退占位符
+            DataFrame: A股代码/名称/股本/日期（不包含B股、基金等）。
+            name 优先取 infoharbor_ex.code 真实名称，缺失时回退占位符；
+            zgb/ltag（万股）与 capital_date/list_date 来自 base.dbf，缺失为 NULL
         """
         # 尝试查找通达信股票数据文件
         sz_path = self.tdx_path / 'vipdoc' / 'sz' / 'lday'
@@ -94,6 +138,8 @@ class TdxDataReader:
             raise FileNotFoundError(f"无法找到股票列表文件或股票数据目录")
 
         real_names = self._load_real_names()
+        capital = self._load_capital_info()
+        _empty_cap = {'zgb': None, 'ltag': None, 'capital_date': None, 'list_date': None}
 
         # 从目录中获取股票代码
         stocks = []
@@ -107,7 +153,7 @@ class TdxDataReader:
                 name = real_names.get(code_str, f"深A{code}")
                 # 深证A股：主板 000/001/002 + 创业板 300/301
                 if re.match(r'^(000|001|002|300|301)\d{3}$', code_str):
-                    stocks.append({'code': code, 'name': name})
+                    stocks.append({'code': code, 'name': name, **capital.get(code_str, _empty_cap)})
 
         # 处理上海股票
         if sh_path.exists():
@@ -118,12 +164,15 @@ class TdxDataReader:
                 name = real_names.get(code_str, f"上A{code}")
                 # 上证A股：主板 60xxxx + 科创板 688xxx（旧正则 688\d{4} 共 7 位，永远匹配不上 6 位代码）
                 if re.match(r'^(60\d{4}|688\d{3})$', code_str):
-                    stocks.append({'code': code, 'name': name})
+                    stocks.append({'code': code, 'name': name, **capital.get(code_str, _empty_cap)})
 
         if not stocks:
             raise FileNotFoundError(f"未找到任何股票数据文件")
 
-        return pd.DataFrame(stocks, columns=['code', 'name'])
+        return pd.DataFrame(
+            stocks,
+            columns=['code', 'name', 'zgb', 'ltag', 'capital_date', 'list_date'],
+        )
 
     def read_daily_data(self, market: int, code: str) -> pd.DataFrame:
         """读取日线数据
