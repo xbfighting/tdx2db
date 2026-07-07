@@ -175,6 +175,9 @@ tdx2db minutes --csv-only
 | `daily_data` | (code, date) | 日线 OHLCV + 均线 |
 | `minute5_data` / `minute15_data` / `minute30_data` / `minute60_data` | (code, datetime) | 分钟线 OHLCV + 均线（15/30/60 由 5 分钟重采样） |
 | `stock_info` | code | 股票列表 |
+| `block_stock_relation` | (block_type, block_name, code) | 板块-个股关系（行业/概念/指数/地区/风格/特殊），全量快照 |
+
+**板块数据**：来自通达信本地板块文件（`T0002/hq_cache/`），随 `sync` 自动更新，也可单独 `tdx2db blocks --db-only`。行业为 881 研究行业（一/二/三级各一行）；中证500/1000 等跨市场指数成分完整；每次同步为全量替换快照（无历史版本）。老用户需执行一次 `scripts/migrate_block_relation.sql`（表结构变更，原表从未有写入路径）。
 
 **均线列**：`ma5 / ma10 / ma60 / ma250` 为常规窗口，`ma13 / ma21 / ma34 / ma55 / ma89 / ma144 / ma233` 为斐波那契窗口（服务缠论类分析，不需要可忽略）。上市不足对应窗口天数的行为 NULL。
 

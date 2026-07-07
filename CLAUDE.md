@@ -26,7 +26,12 @@ tdx2db stock-list --db-only
 
 # 数据库状态一览（只读，不需要 TDX_PATH；--json 机器可读）
 tdx2db status
+
+# 板块-个股关系同步（sync 已自动包含，也可单独跑）
+tdx2db blocks --db-only
 ```
+
+板块数据链（blocks.py，issue #39）：概念/指数/风格 ← `T0002/hq_cache/infoharbor_block.dat`（文本，板块名 8 字节截断需经 880 码还原全名）；行业 ← `tdxhy.cfg` X 码 × `tdxzs3.cfg` 类别 12（881 研究行业多级）；跨市场指数成分 ← `spblock.dat`；地区 ← `base.dbf` DY 字段 × `tdxzs.cfg` 类别 3。全量替换式快照（DELETE+INSERT），与行情表的增量语义不同。旧二进制 block_zs/gn/fg.dat 在新版通达信不存在，pytdx BlockReader 不适用。
 
 `python main.py <子命令>` 与 `tdx2db <子命令>` 等价（main.py 是薄封装，保留老用户习惯）。包目录为 `tdx2db/`（v0.3.0 起从 `src/` 改名，发布到 PyPI）。psycopg2-binary/pymysql 为可选依赖（extras: postgres/mysql/all），默认安装仅支持 SQLite。
 
