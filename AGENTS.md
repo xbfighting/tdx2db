@@ -27,7 +27,7 @@ tdx2db stock-list --db-only  # 同步股票列表
 |----|----------|------|
 | `daily_data` | (code, date) | 日线 OHLCV + 11 条均线 |
 | `minute{5,15,30,60}_data` | (code, datetime) | 分钟线；15/30/60 由 5 分钟重采样 |
-| `stock_info` | code | 股票列表（name 是占位符，见"陷阱"） |
+| `stock_info` | code | 股票列表（name 为真实名称，来自本地 infoharbor_ex.code） |
 | `block_stock_relation` | (block_type, block_name, code) | 板块-个股关系，全量快照；block_type ∈ 行业/概念/指数/地区/风格/特殊 |
 
 - 行情表通用列：`code, market, datetime, date, open, high, low, close, volume, amount, ma5, ma10, ma13, ma21, ma34, ma55, ma60, ma89, ma144, ma233, ma250`
@@ -71,7 +71,7 @@ WHERE code = '000001';
 
 1. **code 格式跨表不一致**：`stock_info.code` 带前缀（`sz000001`），行情表是 6 位纯数字（`000001`）。用 `LIKE 'sh688%'` 查 `daily_data` 会静默零匹配。跨表需 `RIGHT(stock_info.code, 6)`——但内部实践根本不用 `stock_info`（见 3）。
 2. **停牌日必须严格 `date = X` 等值匹配**：想"取不到就用前一天"时要显式写出回退逻辑，`<=` 取最末行会静默错配到停牌前一天。
-3. **`stock_info.name` 是 `深Asz000001` / `上Ash600000` 式占位符**，不是真实股票名。真实名称/板块归属从通达信导出的 CSV 获取（code 记得 `zfill(6)` 对齐）。
+3. **`stock_info.name` 现为真实股票名称**（来自本地 infoharbor_ex.code，含退市名；名称文件缺失时回退 `深Asz000001` 式占位符）。注意 `stock_info.code` 带前缀，与行情表 JOIN 仍需 `RIGHT(code, 6)`。板块归属查 `block_stock_relation`。
 4. **数据不复权**（设计决策，不会改）：与行情软件默认前复权对比时，分红除权的股票形状会不同。复权在消费端自行处理。
 5. **同步不完整会静默算出子集**：`MAX(date)` 已是今天不代表全市场都进来了。见下面的验证流程。
 

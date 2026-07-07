@@ -84,7 +84,7 @@ SELECT
 1. **code 一律 6 位纯数字**。`sh600036` / `sz000001` 是 `stock_info` 和文件名的格式，行情表里没有。
 2. **停牌日显式处理**：`WHERE date = :d` 查不到就是停牌，需要回退到前一交易日时显式写，禁止用 `<= :d ORDER BY date DESC LIMIT 1` 静默错配。
 3. **价格不复权**。除权除息造成的跳空是数据特征不是 bug。
-4. **股票名称不在库里**：`stock_info.name` 是占位符。需要名称/板块时用通达信导出 CSV（code 先 `zfill(6)`），或直接用 code。
+4. **股票名称**：`stock_info.name` 为真实名称（含退市名）。注意 `stock_info.code` 带前缀（`sz000001`），与行情表按 code 关联要 `RIGHT(stock_info.code, 6)`。板块归属查 `block_stock_relation`。
 5. **统计结果踩到极端值（0%/100%/历史新低）先复核口径再下结论**。
 
 ## 排查同步问题

@@ -52,11 +52,32 @@ class TdxDataReader:
         self.min_reader = TdxMinBarReader()
         self.lc_min_reader = TdxLCMinBarReader()
 
+    def _load_real_names(self) -> dict:
+        """读取真实股票名称：T0002/hq_cache/infoharbor_ex.code（issue #42）
+
+        格式：``6位code|股票名|关联人``，GBK，全 A 股含退市名，随盘后下载更新。
+        文件缺失时返回空 dict，get_stock_list 回退占位符命名。
+
+        Returns:
+            dict: 6位纯数字 code -> 股票名
+        """
+        f = self.tdx_path / 'T0002' / 'hq_cache' / 'infoharbor_ex.code'
+        if not f.exists():
+            logger.warning(f"缺少 {f}，stock_info.name 回退为占位符（深A/上A + code）")
+            return {}
+        names = {}
+        for line in f.read_text(encoding='gbk', errors='replace').splitlines():
+            p = line.strip().split('|')
+            if len(p) >= 2 and p[0] and p[1]:
+                names[p[0]] = p[1]
+        return names
+
     def get_stock_list(self) -> pd.DataFrame:
         """获取股票列表
 
         Returns:
-            DataFrame: 包含A股股票代码和名称的DataFrame（不包含B股、基金、等）
+            DataFrame: 包含A股股票代码和名称的DataFrame（不包含B股、基金、等）。
+            name 优先取 infoharbor_ex.code 真实名称，缺失时回退占位符
         """
         # 尝试查找通达信股票数据文件
         sz_path = self.tdx_path / 'vipdoc' / 'sz' / 'lday'
@@ -65,6 +86,8 @@ class TdxDataReader:
         if not (sz_path.exists() or sh_path.exists()):
             raise FileNotFoundError(f"无法找到股票列表文件或股票数据目录")
 
+        real_names = self._load_real_names()
+
         # 从目录中获取股票代码
         stocks = []
 
@@ -72,10 +95,9 @@ class TdxDataReader:
         if sz_path.exists():
             for file in sz_path.glob('*.day'):
                 code = file.stem
-                name = f"深A{code}"
-
                 pure_code = code[-6:]
                 code_str = str(pure_code).zfill(6)  # 补齐为6位字符串
+                name = real_names.get(code_str, f"深A{code}")
                 # 深证A股：主板 000/001/002 + 创业板 300/301
                 if re.match(r'^(000|001|002|300|301)\d{3}$', code_str):
                     stocks.append({'code': code, 'name': name})
@@ -84,10 +106,9 @@ class TdxDataReader:
         if sh_path.exists():
             for file in sh_path.glob('*.day'):
                 code = file.stem
-                name = f"上A{code}"
-
                 pure_code = code[-6:]
                 code_str = str(pure_code).zfill(6)  # 补齐为6位字符串
+                name = real_names.get(code_str, f"上A{code}")
                 # 上证A股：主板 60xxxx + 科创板 688xxx（旧正则 688\d{4} 共 7 位，永远匹配不上 6 位代码）
                 if re.match(r'^(60\d{4}|688\d{3})$', code_str):
                     stocks.append({'code': code, 'name': name})
