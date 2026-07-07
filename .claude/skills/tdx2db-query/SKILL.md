@@ -55,6 +55,10 @@ ORDER BY datetime;
 SELECT code FROM block_stock_relation
 WHERE block_type = '行业' AND block_name = '煤炭开采';
 
+-- 全部二级行业（≈ 通达信导出 CSV 的行业口径，板块强弱迭代用这个）
+SELECT DISTINCT block_name FROM block_stock_relation
+WHERE block_type = '行业' AND block_level = 2;
+
 -- 个股 → 全部板块归属
 SELECT block_type, block_code, block_name FROM block_stock_relation WHERE code = :code6;
 

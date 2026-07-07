@@ -35,6 +35,7 @@ class BlockStockRelation(Base):
     block_type = Column(String(10), index=True)  # 行业/概念/指数/地区/风格/特殊
     block_code = Column(String(20), index=True, nullable=True)  # 880/881 板块代码，可空
     block_name = Column(String(50), index=True)  # 板块名称
+    block_level = Column(Integer, nullable=True)  # 行业层级 1/2/3（二级≈通达信导出 CSV 口径），其他类型为 NULL
     code = Column(String(10), index=True)  # 股票代码（6 位纯数字，与行情表口径一致）
 
 class DailyData(Base):
