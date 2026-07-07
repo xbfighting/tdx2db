@@ -30,7 +30,7 @@ tdx2db status
 
 `python main.py <子命令>` 与 `tdx2db <子命令>` 等价（main.py 是薄封装，保留老用户习惯）。包目录为 `tdx2db/`（v0.3.0 起从 `src/` 改名，发布到 PyPI）。psycopg2-binary/pymysql 为可选依赖（extras: postgres/mysql/all），默认安装仅支持 SQLite。
 
-测试：`pytest tests/`（processor 纯函数 + 模块导入冒烟，CI 三矩阵 3.9/3.10/3.11 运行）。数据正确性验证仍以运行 `sync` 后检查数据库为准。
+测试：`pytest tests/`。CI 矩阵：ubuntu + windows × 3.9/3.11（+ ubuntu 3.10）——Windows 是用户主场景必须覆盖。`tests/fixtures/` 存 .day/.lc5 二进制解析 fixture（合成字节，生成器 `make_fixtures.py`；断言值与生成参数一一对应）。数据正确性验证仍以运行 `sync` 后检查数据库为准。
 
 ## 发布 PyPI（维护者）
 
