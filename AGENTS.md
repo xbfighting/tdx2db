@@ -77,9 +77,19 @@ SELECT
                  WHERE date < (SELECT MAX(date) FROM daily_data))) AS prev_n;
 ```
 
+## 需要复权时（消费端自助，库本身永远不复权）
+
+窗口内有分红除权的股票，不复权价格会出现跳空——这是数据特征不是 bug。消费端自助复权的成熟做法是**涨跌幅复权 factor 法**（参考 [rustdx 的实现与 SQL 范例](https://github.com/zjp-CN/rustdx#使用示例)，原理见其作者的[《涨跌幅复权与前复权》](https://zjp-cn.github.io/posts/qfq/)）：
+
+1. 从除权除息信息（通达信 gbbq 股本变迁文件，或任意财经数据源）算出除权日调整后的 preclose
+2. factor = 每日 (close / preclose) 累乘；增量维护时新 factor = 昨日 factor × (今收 / 今前收)，永不重算历史
+3. 前复权价 = factor × (最新 close / 最新 factor)，任意周期涨幅 = 末 factor / 首 factor × 首 close / 首 preclose
+
+注意：该算法与券商软件的前复权存在小的口径/浮点差异（rustdx issue #32/#37 有讨论），做形态对比时留意；做收益率计算则完全够用。
+
 ## 数据契约（不要试图"修复"这些）
 
-- 不复权，默认口径永不改变
+- 不复权，默认口径永不改变（复权见上一节，消费端处理）
 - `daily_data`/`minute*` 的 code 保持 6 位纯数字
 - 行情表不存股票名称
 - 均线窗口固定为 `[5,10,13,21,34,55,60,89,144,233,250]`
