@@ -666,8 +666,18 @@ class DataStorage:
             csv_path = self.save_to_csv(df, 'block_stock_relation')
 
         if to_db:
-            with self.engine.begin() as conn:
-                conn.execute(text("DELETE FROM block_stock_relation"))
-            db_success = self.save_to_database(df, 'block_stock_relation', batch_size=batch_size)
+            # DELETE + INSERT 必须同一事务：任一批次失败整体回滚，
+            # 保住旧快照——否则失败会留下空表/半新半旧快照（PR #40 review）
+            try:
+                with self.engine.begin() as conn:
+                    conn.execute(text("DELETE FROM block_stock_relation"))
+                    df.to_sql(
+                        'block_stock_relation', conn,
+                        if_exists='append', index=False, chunksize=batch_size,
+                    )
+                db_success = True
+            except Exception as e:
+                logger.error(f"板块关系写入失败，已整体回滚、保留旧快照: {e}")
+                db_success = False
 
         return csv_path, db_success

@@ -175,3 +175,23 @@ class TestSnapshotReplace:
         with storage.engine.connect() as conn:
             n = conn.execute(text("SELECT COUNT(*) FROM block_stock_relation")).scalar()
         assert n == 2
+
+    def test_failed_replace_keeps_old_snapshot(self, tmp_path, monkeypatch):
+        """替换写入失败必须整体回滚，保留旧快照（不能变成空表）"""
+        monkeypatch.setattr(config, 'db_type', 'sqlite')
+        storage = DataStorage(db_url='sqlite://', csv_path=str(tmp_path))
+
+        good = pd.DataFrame(
+            [('概念', '880948', '人形机器人', '000016')],
+            columns=['block_type', 'block_code', 'block_name', 'code'],
+        )
+        _, ok = storage.save_block_relation(good, to_csv=False)
+        assert ok
+
+        bad = good.assign(no_such_column='x')  # 未知列 → INSERT 必然失败
+        _, ok = storage.save_block_relation(bad, to_csv=False)
+        assert not ok
+
+        with storage.engine.connect() as conn:
+            n = conn.execute(text("SELECT COUNT(*) FROM block_stock_relation")).scalar()
+        assert n == 1  # 旧快照仍在，未被 DELETE 清空
