@@ -53,9 +53,12 @@ WHERE date = '2026-07-03' AND ma233 IS NOT NULL;
 -- 3. 最新交易日探测（加 ma5 条件确保当日指标已计算完成）
 SELECT MAX(date) FROM daily_data WHERE ma5 IS NOT NULL;
 
--- 4. 按板块取成分（行业含一/二/三级，用 block_name 或 block_code 定位）
+-- 4. 按板块取成分（行业含一/二/三级；block_level=2 ≈ 通达信导出 CSV 的行业口径）
 SELECT code FROM block_stock_relation
 WHERE block_type = '行业' AND block_name = '煤炭开采';
+
+SELECT DISTINCT block_name FROM block_stock_relation
+WHERE block_type = '行业' AND block_level = 2;   -- 全部二级行业（板块强弱迭代口径）
 
 -- 5. 按个股查板块归属
 SELECT block_type, block_code, block_name FROM block_stock_relation

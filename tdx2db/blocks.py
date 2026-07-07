@@ -159,7 +159,8 @@ def collect_block_relations(tdx_path) -> pd.DataFrame:
         DataFrame: 列 block_type / block_code / block_name / code
     """
     hq = Path(tdx_path) / 'T0002' / 'hq_cache'
-    rows: List[Tuple[str, Optional[str], str, str]] = []
+    # (block_type, block_code, block_name, block_level, code)
+    rows: List[Tuple[str, Optional[str], str, Optional[int], str]] = []
 
     # 板块代码 -> 全名（还原 infoharbor 截断名）
     fullname: Dict[str, str] = {}
@@ -186,12 +187,12 @@ def collect_block_relations(tdx_path) -> pd.DataFrame:
         if not codes:
             continue
         name = fullname.get(s['block_code'], s['name']) if s['block_code'] else s['name']
-        rows.extend((s['type'], s['block_code'], name, c) for c in codes)
+        rows.extend((s['type'], s['block_code'], name, None, c) for c in codes)
 
     # spblock 中未被 infoharbor 收录的板块（融资融券等）归为"特殊"
     for name, codes in sp_boards.items():
         if name not in ih_names:
-            rows.extend(('特殊', None, name, c) for c in codes)
+            rows.extend(('特殊', None, name, None, c) for c in codes)
 
     # --- 行业（tdxhy X 码 × tdxzs3 类别 12，多级前缀匹配各入一行） ---
     hy_file = hq / 'tdxhy.cfg'
@@ -199,11 +200,14 @@ def collect_block_relations(tdx_path) -> pd.DataFrame:
     if hy_file.exists() and zs3_file.exists():
         key2board = parse_zs_cfg(zs3_file, '12')
         keys = sorted(key2board, key=len, reverse=True)
+        # 层级 = 自身及前缀 key 的数量（X10→1，X1001→2，X100101→3），
+        # 不依赖 key 长度约定，对分类体系调整鲁棒
+        key_level = {k: sum(1 for o in key2board if k.startswith(o)) for k in key2board}
         for code, x in parse_tdxhy(hy_file).items():
             for k in keys:
                 if x.startswith(k):
                     name, bcode = key2board[k]
-                    rows.append(('行业', bcode, name, code))
+                    rows.append(('行业', bcode, name, key_level[k], code))
     else:
         logger.warning(f"缺少 {hy_file.name}/{zs3_file.name}，跳过行业板块")
 
@@ -215,11 +219,11 @@ def collect_block_relations(tdx_path) -> pd.DataFrame:
         for code, dy in parse_base_dbf_dy(dbf_file).items():
             if dy in dy2board:
                 name, bcode = dy2board[dy]
-                rows.append(('地区', bcode, name, code))
+                rows.append(('地区', bcode, name, None, code))
     else:
         logger.warning(f"缺少 {dbf_file.name}/{zs_file.name}，跳过地区板块")
 
-    df = pd.DataFrame(rows, columns=['block_type', 'block_code', 'block_name', 'code'])
+    df = pd.DataFrame(rows, columns=['block_type', 'block_code', 'block_name', 'block_level', 'code'])
     df = df.drop_duplicates(subset=['block_type', 'block_name', 'code'])
     if not df.empty:
         counts = df.groupby('block_type')['block_name'].nunique().to_dict()

@@ -138,10 +138,14 @@ class TestCollect:
         sp = df[(df.block_type == '特殊') & (df.block_name == '融资融券')]
         assert set(sp.code) == {'000001'}
 
-        # 行业：X100101 命中三级各一行
+        # 行业：X100101 命中三级各一行，block_level 标注层级
         hy = df[(df.block_type == '行业') & (df.code == '000552')]
         assert set(hy.block_name) == {'煤炭', '煤炭开采', '动力煤'}
         assert set(hy.block_code) == {'881001', '881002', '881003'}
+        assert dict(zip(hy.block_name, hy.block_level)) == {'煤炭': 1, '煤炭开采': 2, '动力煤': 3}
+
+        # 非行业类型 block_level 为空
+        assert df[df.block_type != '行业'].block_level.isna().all()
         # 无匹配 key 的 X9999 不产生行
         assert df[(df.block_type == '行业') & (df.code == '600000')].empty
 
