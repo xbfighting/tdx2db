@@ -172,6 +172,16 @@ class TestCollect:
         df = collect_block_relations(tmp_path)
         assert df.empty  # 全缺失 → 空 DataFrame，不抛异常
 
+    def test_malformed_dbf_degrades_only_area_chain(self, hq_cache):
+        """base.dbf 缺 DY 字段（ValueError）→ 仅地区链降级，
+        不吞掉已收集的其他链（review 发现：原先 ValueError 会传播丢弃全部 rows）"""
+        hq = hq_cache / 'T0002' / 'hq_cache'
+        _make_dbf(hq / 'base.dbf', [('0', '000711')], fields=[('SC', 2), ('GPDM', 6)])
+
+        df = collect_block_relations(hq_cache)
+        assert '地区' not in set(df.block_type)
+        assert {'概念', '行业'} <= set(df.block_type)
+
     def test_unreadable_file_degrades_per_chain(self, hq_cache):
         """文件存在但不可读（#44 同款：SMB 下被运行中的通达信锁定）→
         该链跳过，其余链正常。用目录冒充文件触发 OSError，跨平台可复现"""

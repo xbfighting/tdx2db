@@ -179,7 +179,9 @@ def collect_block_relations(tdx_path) -> pd.DataFrame:
             return empty
         try:
             return parser(f)
-        except OSError as e:
+        except (OSError, ValueError) as e:
+            # OSError=缺失/被锁不可读；ValueError=格式异常（如 base.dbf 缺列）。
+            # 均单链降级，不吞掉其他链已收集的结果
             logger.warning(f"读取 {f} 失败（{e}），跳过{what}")
             return empty
 
