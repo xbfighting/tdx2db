@@ -28,6 +28,7 @@ tdx2db stock-list --db-only  # 同步股票列表
 | `daily_data` | (code, date) | 日线 OHLCV + 11 条均线 |
 | `minute{5,15,30,60}_data` | (code, datetime) | 分钟线；15/30/60 由 5 分钟重采样 |
 | `stock_info` | code | 股票列表（name 是占位符，见"陷阱"） |
+| `block_stock_relation` | (block_type, block_name, code) | 板块-个股关系，全量快照；block_type ∈ 行业/概念/指数/地区/风格/特殊 |
 
 - 行情表通用列：`code, market, datetime, date, open, high, low, close, volume, amount, ma5, ma10, ma13, ma21, ma34, ma55, ma60, ma89, ma144, ma233, ma250`
 - 均线：`ma13/21/34/55/89/144/233` 是斐波那契窗口（缠论强弱分析主力），`ma233` 常被当作年线；上市天数不足窗口的行为 NULL
@@ -51,7 +52,17 @@ WHERE date = '2026-07-03' AND ma233 IS NOT NULL;
 
 -- 3. 最新交易日探测（加 ma5 条件确保当日指标已计算完成）
 SELECT MAX(date) FROM daily_data WHERE ma5 IS NOT NULL;
+
+-- 4. 按板块取成分（行业含一/二/三级，用 block_name 或 block_code 定位）
+SELECT code FROM block_stock_relation
+WHERE block_type = '行业' AND block_name = '煤炭开采';
+
+-- 5. 按个股查板块归属
+SELECT block_type, block_code, block_name FROM block_stock_relation
+WHERE code = '000001';
 ```
+
+板块注意：行业是 881"研究行业"口径（多级，一股多行）；板块名以 `tdxzs.cfg` 官方全名为准，与通达信软件导出 CSV 偶有变体（如"碳纤维概念" vs 导出的"碳纤维"），跨口径对齐用 `block_code`；关系表为全量快照，无历史版本。
 
 ## 陷阱（每一条都有真实事故背书）
 

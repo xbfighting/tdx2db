@@ -49,6 +49,22 @@ ORDER BY datetime;
 
 **周线/月线**：无独立表，取日线后 pandas `resample('W')`/`resample('ME')` 聚合（open=first, high=max, low=min, close=last, volume/amount=sum）。
 
+**板块成分 / 个股板块归属**（block_type ∈ 行业/概念/指数/地区/风格/特殊）
+```sql
+-- 板块 → 成分（行业为 881 研究行业，一/二/三级各一行，按名或 block_code 定位）
+SELECT code FROM block_stock_relation
+WHERE block_type = '行业' AND block_name = '煤炭开采';
+
+-- 个股 → 全部板块归属
+SELECT block_type, block_code, block_name FROM block_stock_relation WHERE code = :code6;
+
+-- 板块成分 JOIN 行情（北交所成员在行情表无数据，JOIN 自然过滤）
+SELECT d.code, d.close, d.ma233
+FROM block_stock_relation b JOIN daily_data d ON d.code = b.code
+WHERE b.block_type = '概念' AND b.block_name = '人形机器人' AND d.date = :d;
+```
+板块表为全量快照（随 sync 更新，无历史版本）；板块名以 tdxzs.cfg 官方全名为准，跨口径对齐用 block_code。
+
 **覆盖度自检**（跑批前防"同步不完整静默算子集"）
 ```sql
 SELECT
