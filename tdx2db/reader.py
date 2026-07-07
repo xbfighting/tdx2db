@@ -62,11 +62,18 @@ class TdxDataReader:
             dict: 6位纯数字 code -> 股票名
         """
         f = self.tdx_path / 'T0002' / 'hq_cache' / 'infoharbor_ex.code'
-        if not f.exists():
-            logger.warning(f"缺少 {f}，stock_info.name 回退为占位符（深A/上A + code）")
+        try:
+            if not f.exists():
+                logger.warning(f"缺少 {f}，stock_info.name 回退为占位符（深A/上A + code）")
+                return {}
+            text = f.read_text(encoding='gbk', errors='replace')
+        except OSError as e:
+            # 文件存在但不可读（SMB 挂载下被运行中的通达信锁定等场景，
+            # 表现为 EPERM）——名称是可选增强，不应中断 daily/minutes 同步
+            logger.warning(f"读取 {f} 失败（{e}），stock_info.name 回退为占位符")
             return {}
         names = {}
-        for line in f.read_text(encoding='gbk', errors='replace').splitlines():
+        for line in text.splitlines():
             p = line.strip().split('|')
             if len(p) >= 2 and p[0] and p[1]:
                 names[p[0]] = p[1]
