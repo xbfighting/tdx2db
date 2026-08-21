@@ -240,16 +240,6 @@ pytest tests/          # 单元测试（不需要真实 TDX 数据和数据库�
 
 **用 AI agent 查询数据**：仓库带 `AGENTS.md`（schema、典型查询、陷阱清单，跨工具通用）和 Claude Code skill（`.claude/skills/tdx2db-query/`）。在本仓库目录下工作的 agent 可直接正确使用数据库，无需人工解释。
 
-## Star History
-
-<a href="https://www.star-history.com/#xbfighting/tdx2db&Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=xbfighting/tdx2db&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=xbfighting/tdx2db&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=xbfighting/tdx2db&type=Date" />
-  </picture>
-</a>
-
 ## 许可证
 
 [MIT](LICENSE)
