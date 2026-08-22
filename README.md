@@ -213,7 +213,7 @@ WHERE d.code = '000001' ORDER BY d.date DESC LIMIT 20;
 注意：股本是当前快照，股本变动点（配股/增发等）之前的历史换手率会失真；精确历史换手率需自行结合 gbbq 股本变迁数据。`list_date` 上市日期也在 `stock_info` 中，可用于次新股过滤。老库需执行一次 `scripts/migrate_stock_info_capital.sql` 后重跑 `tdx2db stock-list --db-only`。
 
 **Q: 数据是否复权？**
-A: 不复权，且默认口径不会改变（设计决策，见 issue #2）。复权请在消费端处理。
+A: 不复权，且默认口径不会改变（设计决策，见 issue #2）。复权请在消费端处理：具体做法（涨跌幅复权 factor 法及参考实现）见 [AGENTS.md](AGENTS.md) 的「需要复权时」一节。
 
 ## 开发与贡献
 
