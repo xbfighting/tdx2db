@@ -1,0 +1,10 @@
+# 自动跟进 GitHub Actions 版本（runner 的 Node 运行时会定期淘汰旧大版本）
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

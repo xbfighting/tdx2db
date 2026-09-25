@@ -14,11 +14,14 @@ classifiers = [
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Office/Business :: Financial :: Investment",
 ]
 dependencies = [
     "pytdx>=1.72,<2",
-    "pandas>=2.2.3,<3",
+    "pandas>=2.2.3,<4",
     "sqlalchemy>=2.0.40,<3",
     "tqdm>=4.67.1,<5",
     "python-dotenv>=1.1.0,<2",
