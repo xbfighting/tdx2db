@@ -121,3 +121,13 @@ def test_save_incremental_raises_on_write_failure(sqlite_storage):
         conn.commit()
     with pytest.raises(RuntimeError, match='daily_data'):
         sqlite_storage.save_incremental(_daily_df(), 'daily_data', conflict_columns=('code', 'date'))
+
+
+def test_csv_dir_created_lazily(tmp_path, monkeypatch):
+    """CSV 目录只在真正写 CSV 时创建：status / --db-only 不留空目录"""
+    monkeypatch.setattr(config, 'db_type', 'sqlite')
+    out = tmp_path / 'out'
+    storage = DataStorage(db_url='sqlite://', csv_path=str(out), create_tables=False)
+    assert not out.exists()
+    storage.save_to_csv(_daily_df(), 'daily_data')
+    assert (out / 'daily_data.csv').exists()

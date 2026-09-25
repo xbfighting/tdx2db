@@ -12,8 +12,7 @@ from typing import Optional, Tuple
 
 import pandas as pd
 from sqlalchemy import create_engine, inspect, Column, Date, Integer, Float, String, DateTime, MetaData, Table, UniqueConstraint, text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 from tqdm import tqdm
 
 from .config import config
@@ -233,11 +232,8 @@ class DataStorage:
             create_tables: 是否自动建表。status 等只读命令传 False，保证不产生任何写操作
         """
         self.db_url = db_url or config.database_url
+        # CSV 目录延迟到 save_to_csv 时创建：--db-only / status 不应在工作目录留下空 output/
         self.csv_path = csv_path or config.csv_output_path
-
-        # 确保CSV输出目录存在
-        if self.csv_path:
-            os.makedirs(self.csv_path, exist_ok=True)
 
         # 初始化数据库连接
         if self.db_url:
@@ -270,6 +266,8 @@ class DataStorage:
             logger.warning(f"没有数据可保存到 {filename}.csv")
             return None
 
+        if self.csv_path:
+            os.makedirs(self.csv_path, exist_ok=True)
         file_path = Path(self.csv_path) / f"{filename}.csv"
         df.to_csv(file_path, index=False, encoding='utf-8')
         logger.info(f"数据已保存到: {file_path}")

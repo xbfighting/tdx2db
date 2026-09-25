@@ -405,7 +405,9 @@ def run_status(storage: DataStorage, as_json: bool = False) -> int:
             f"{s['earliest'] or '-':<18}{s['latest'] or '-':<18}"
         )
     for w in warnings:
-        print(f"\n⚠️  {w}")
+        # 不用 emoji：Windows 下 stdout 重定向到文件/管道时编码为 cp936(GBK)，
+        # ⚠ 无法编码会 UnicodeEncodeError（计划任务 `tdx2db status > log.txt` 场景）
+        print(f"\n[警告] {w}")
     return 0
 
 

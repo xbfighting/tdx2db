@@ -134,6 +134,20 @@ class TestRunStatus:
         assert run_status(storage) == 0
         assert '未创建' in capsys.readouterr().out
 
+    def test_human_output_warning_encodable_in_gbk(self, sqlite_storage, capsys):
+        """Windows 下 stdout 重定向时编码为 cp936(GBK)：输出必须可编码，
+        否则 `tdx2db status > log.txt` 在有警告时 UnicodeEncodeError 崩溃"""
+        reader = _FakeReader(_fivemin_df())
+        sync_single_stock_min_data(reader, DataProcessor(), sqlite_storage, 0, 'sz301088')
+        with sqlite_storage.engine.connect() as conn:
+            conn.execute(text("DELETE FROM minute15_data"))
+            conn.commit()
+
+        assert run_status(sqlite_storage) == 0
+        out = capsys.readouterr().out
+        assert 'minute15_data' in out
+        out.encode('gbk')  # 不抛 UnicodeEncodeError
+
 
 class _FakeDailyReader:
     """替代 TdxDataReader：单只股票的日线"""
@@ -223,3 +237,10 @@ class TestMinutesAutoStart:
         assert tdx_env('minutes', '--csv-only') == 1
         with tdx_env.storage().engine.connect() as conn:
             assert conn.execute(text("SELECT COUNT(*) FROM minute5_data")).scalar() == 0
+
+
+def test_db_only_commands_do_not_create_output_dir(tdx_env, tmp_path):
+    """--db-only / status 不应在工作目录留下空 output/（status 承诺零写操作）"""
+    assert tdx_env('status') == 0
+    assert tdx_env('minutes', '--db-only', '--auto-start') == 0
+    assert not (tmp_path / 'output').exists()

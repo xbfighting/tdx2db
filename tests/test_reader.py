@@ -9,8 +9,6 @@ fixture 为确定性合成字节（见 tests/fixtures/make_fixtures.py），
 import shutil
 from pathlib import Path
 
-import os
-
 import pandas as pd
 import pytest
 
@@ -198,21 +196,27 @@ class TestLc5Parsing:
 
 
 class TestStockListNamesUnreadable:
-    @pytest.mark.skipif(os.name == 'nt', reason='chmod 权限位在 Windows 无效')
-    def test_fallback_placeholder_when_file_unreadable(self, tmp_path):
-        """名称文件存在但不可读（SMB 锁定 EPERM 等）回退占位符，不中断同步"""
-        import shutil as _shutil
+    def test_fallback_placeholder_when_file_unreadable(self, tmp_path, monkeypatch):
+        """名称文件存在但不可读（SMB 锁定 EPERM 等）回退占位符，不中断同步
+
+        用 monkeypatch 模拟 PermissionError 而非 chmod 000：root 用户（Docker/CI 容器）
+        无视权限位照样能读，Windows 上 chmod 无效——两者都会让测试失真
+        """
         d = tmp_path / 'vipdoc' / 'sz' / 'lday'
         d.mkdir(parents=True)
-        _shutil.copy(FIXTURES / 'sz000001.day', d / 'sz000001.day')
+        shutil.copy(FIXTURES / 'sz000001.day', d / 'sz000001.day')
         hq = tmp_path / 'T0002' / 'hq_cache'
         hq.mkdir(parents=True)
-        f = hq / 'infoharbor_ex.code'
-        f.write_bytes('000001|平安银行|x\n'.encode('gbk'))
-        f.chmod(0o000)
-        try:
-            df = TdxDataReader(tdx_path=str(tmp_path)).get_stock_list()
-        finally:
-            f.chmod(0o644)
+        (hq / 'infoharbor_ex.code').write_bytes('000001|平安银行|x\n'.encode('gbk'))
+
+        real_read_text = Path.read_text
+
+        def locked_read_text(self, *args, **kwargs):
+            if self.name == 'infoharbor_ex.code':
+                raise PermissionError(1, 'Operation not permitted', str(self))
+            return real_read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, 'read_text', locked_read_text)
+        df = TdxDataReader(tdx_path=str(tmp_path)).get_stock_list()
         names = dict(zip(df.code, df.name))
         assert names['sz000001'] == '深Asz000001'
