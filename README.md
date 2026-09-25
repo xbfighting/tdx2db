@@ -164,8 +164,9 @@ tdx2db minutes --db-only --start_date 2025-01-01
 
 ```bash
 tdx2db daily --csv-only
-tdx2db minutes --csv-only
 ```
+
+分钟线（`minutes`）只写数据库，暂不支持 CSV 导出。
 </details>
 
 ## 数据表结构

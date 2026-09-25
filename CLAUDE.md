@@ -79,7 +79,7 @@ CLI (cli.py)  → Reader (reader.py) → Processor (processor.py) → Storage (s
 | `daily_data` | (code, date) | 日线数据 |
 | `minute{5,15,30,60}_data` | (code, datetime) | 分钟线数据 |
 | `stock_info` | code | 股票列表 |
-| `block_stock_relation` | — | 板块关系（未完整实现） |
+| `block_stock_relation` | (block_type, block_name, code) | 板块-个股关系（全量快照，blocks.py） |
 
 唯一约束已内建于 `tdx2db/storage.py` 的模型定义（`create_all` 自动创建）；仅老库（PR #17 之前建的表）需执行 `scripts/add_constraints.sql` / `add_constraints_mysql.sql` 迁移。
 
