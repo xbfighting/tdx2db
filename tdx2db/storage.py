@@ -397,7 +397,11 @@ class DataStorage:
             batch_size: 批处理大小
 
         Returns:
-            int: 实际插入的行数
+            int: 提交写入的行数（含被唯一约束跳过的重复行）
+
+        Raises:
+            RuntimeError: 写库失败。不能吞掉返回 0——调用方会把它当成"无新数据"，
+                老库缺约束导致全部写入失败时照样报"已是最新"、退出码 0
         """
         if table_name not in _VALID_TABLES:
             raise ValueError(f"不允许写入的表名: {table_name}")
@@ -455,8 +459,8 @@ class DataStorage:
             return total_rows
 
         except Exception as e:
-            logger.error(f"增量保存数据到表 {table_name} 时出错: {e}")
-            return 0
+            # 由调用方计入失败数并记日志（逐股票循环据此判定失败率与退出码）
+            raise RuntimeError(f"增量保存数据到表 {table_name} 时出错: {e}") from e
 
     def _save_incremental_pg(
         self,

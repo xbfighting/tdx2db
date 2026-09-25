@@ -540,17 +540,21 @@ def main() -> int:
 
     elif args.command == 'minutes':
         try:
-            # 处理 --auto-start 参数（使用15分钟线表作为参考）
-            start_date = args.start_date
-            if hasattr(args, 'auto_start') and args.auto_start and not start_date:
-                latest = storage.get_latest_datetime('minute15_data')
-                if latest:
-                    start_date = (latest + timedelta(days=1)).strftime('%Y-%m-%d')
-                    logger.info(f"自动检测起始日期: {start_date}")
-                else:
-                    logger.info("数据库中没有数据，将获取所有数据")
+            # 分钟线同步只写数据库（逐股票流式，无 CSV 写出路径）：
+            # 此前 --csv-only 被静默忽略、照样写库且退出码 0
+            if args.csv_only:
+                logger.error("minutes 暂不支持 CSV 导出（--csv-only），请使用 --db-only")
+                return 1
 
+            start_date = args.start_date
             incremental = hasattr(args, 'incremental') and args.incremental
+
+            # --auto-start：逐股票、逐表精确增量（与 sync 同路径），不再取 minute15 全表 MAX。
+            # 全表 MAX+1 做统一起点会把新股/中断未完成股票的历史静默过滤掉（daily 的 issue #12 同款）
+            if hasattr(args, 'auto_start') and args.auto_start and not start_date:
+                incremental = True
+            if args.end_date:
+                logger.warning(f"minutes 当前不支持 --end_date，已忽略 {args.end_date}")
 
             # 获取分钟线数据
             if args.code:

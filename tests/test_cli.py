@@ -1,15 +1,21 @@
 """cli 纯函数测试（issue #24）+ status / 分钟线增量自愈测试（issue #28 / #11）"""
 
 import json
+import shutil
+from pathlib import Path
 
 import pandas as pd
 import pytest
 from sqlalchemy import text
 
-from tdx2db.cli import infer_market, parse_args, run_status, sync_single_stock_min_data
+from tdx2db.cli import (
+    infer_market, main, parse_args, run_status, sync_all_daily_data, sync_single_stock_min_data,
+)
 from tdx2db.config import config
 from tdx2db.processor import DataProcessor
 from tdx2db.storage import DataStorage
+
+FIXTURES = Path(__file__).parent / 'fixtures'
 
 
 class TestInferMarket:
@@ -127,3 +133,93 @@ class TestRunStatus:
         storage = DataStorage(db_url='sqlite://', csv_path=str(tmp_path), create_tables=False)
         assert run_status(storage) == 0
         assert '未创建' in capsys.readouterr().out
+
+
+class _FakeDailyReader:
+    """替代 TdxDataReader：单只股票的日线"""
+
+    def get_stock_list(self):
+        return pd.DataFrame({'code': ['sz000001'], 'name': ['平安银行']})
+
+    def read_daily_data(self, market, code):
+        days = pd.date_range('2026-01-05', periods=3)
+        return pd.DataFrame({
+            'open': 10.0, 'high': 10.5, 'low': 9.5, 'close': 10.2,
+            'amount': 10200.0, 'volume': 1000.0, 'code': '000001', 'market': 0,
+        }, index=pd.DatetimeIndex(days, name='date'))
+
+
+class TestDailySyncWriteFailure:
+    def test_write_failure_is_counted_not_reported_as_up_to_date(self, sqlite_storage):
+        """写库失败必须计入失败数、返回 False（退出码 1）。此前 save_incremental
+        吞异常返回 0，全部写入失败时照样报"日线数据已是最新"、退出码 0"""
+        with sqlite_storage.engine.connect() as conn:
+            conn.execute(text("DROP TABLE daily_data"))
+            conn.commit()
+
+        assert sync_all_daily_data(_FakeDailyReader(), DataProcessor(), sqlite_storage) is False
+
+    def test_success_path_still_returns_true(self, sqlite_storage):
+        assert sync_all_daily_data(_FakeDailyReader(), DataProcessor(), sqlite_storage) is True
+        with sqlite_storage.engine.connect() as conn:
+            assert conn.execute(text("SELECT COUNT(*) FROM daily_data")).scalar() == 3
+
+
+@pytest.fixture
+def tdx_env(tmp_path, monkeypatch):
+    """真实 fixture 文件组成的最小通达信目录 + SQLite 文件库，走完整 main() 路径。
+
+    config 是全局单例、update_config 会改写它：先 monkeypatch 相关属性，
+    测试结束自动还原，避免污染其他测试
+    """
+    tdx = tmp_path / 'tdx'
+    for sub, fname in (('lday', 'sz000001.day'), ('fzline', 'sz000001.lc5')):
+        d = tdx / 'vipdoc' / 'sz' / sub
+        d.mkdir(parents=True)
+        shutil.copy(FIXTURES / fname, d / fname)
+    for attr in ('tdx_path', 'db_type', 'db_name', 'use_tqdm', 'csv_output_path'):
+        monkeypatch.setattr(config, attr, getattr(config, attr))
+    monkeypatch.chdir(tmp_path)
+    db_name = str(tmp_path / 'tdx_test')
+
+    def run(*argv):
+        monkeypatch.setattr('sys.argv', [
+            'tdx2db', '--no-tqdm', '--tdx-path', str(tdx),
+            '--db-type', 'sqlite', '--db-name', db_name, *argv,
+        ])
+        return main()
+
+    run.storage = lambda: DataStorage(db_url=f'sqlite:///{db_name}.db', csv_path=str(tmp_path / 'out'))
+    return run
+
+
+class TestMinutesAutoStart:
+    def test_new_stock_history_not_filtered_by_other_stocks_latest(self, tdx_env):
+        """minutes --auto-start 逐股票增量：库里其他股票更新到 06-10，
+        新纳入的 000001（数据在 06-05）也必须全历史入库。
+        旧逻辑取 minute15 全表 MAX+1 做统一起点，000001 被整段过滤（daily #12 同款）"""
+        storage = tdx_env.storage()
+        with storage.engine.connect() as conn:
+            conn.execute(text(
+                "INSERT INTO minute15_data (code, market, datetime, date, open, high, low, close, volume, amount) "
+                "VALUES ('600000', 1, '2026-06-10 15:00:00', '2026-06-10 00:00:00', 1, 1, 1, 1, 1, 1)"
+            ))
+            conn.commit()
+
+        assert tdx_env('minutes', '--db-only', '--auto-start', '--incremental') == 0
+
+        with storage.engine.connect() as conn:
+            n = conn.execute(text("SELECT COUNT(*) FROM minute5_data WHERE code = '000001'")).scalar()
+        assert n == 2
+
+    def test_auto_start_rerun_is_idempotent(self, tdx_env):
+        assert tdx_env('minutes', '--db-only', '--auto-start') == 0
+        assert tdx_env('minutes', '--db-only', '--auto-start') == 0
+        with tdx_env.storage().engine.connect() as conn:
+            assert conn.execute(text("SELECT COUNT(*) FROM minute5_data")).scalar() == 2
+
+    def test_csv_only_rejected_instead_of_silently_writing_db(self, tdx_env):
+        """minutes 没有 CSV 写出路径：此前 --csv-only 被忽略、照样写库、退出码 0"""
+        assert tdx_env('minutes', '--csv-only') == 1
+        with tdx_env.storage().engine.connect() as conn:
+            assert conn.execute(text("SELECT COUNT(*) FROM minute5_data")).scalar() == 0

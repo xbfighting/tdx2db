@@ -112,3 +112,12 @@ def test_get_latest_datetime_returns_datetime_on_sqlite(sqlite_storage):
         assert isinstance(value, datetime), type(value)
         # 增量路径的实际用法必须可运算
         assert (value + timedelta(days=1)).strftime('%Y-%m-%d') == '2026-01-08'
+
+
+def test_save_incremental_raises_on_write_failure(sqlite_storage):
+    """写库失败抛异常而非返回 0：返回 0 会被调用方当成"无新数据"静默吞掉"""
+    with sqlite_storage.engine.connect() as conn:
+        conn.execute(text("DROP TABLE daily_data"))
+        conn.commit()
+    with pytest.raises(RuntimeError, match='daily_data'):
+        sqlite_storage.save_incremental(_daily_df(), 'daily_data', conflict_columns=('code', 'date'))
